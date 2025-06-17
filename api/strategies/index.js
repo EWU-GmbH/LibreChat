@@ -2,6 +2,7 @@ const appleLogin = require('./appleStrategy');
 const passportLogin = require('./localStrategy');
 const googleLogin = require('./googleStrategy');
 const githubLogin = require('./githubStrategy');
+const bitrix24Login = require('./bitrix24Strategy');
 const discordLogin = require('./discordStrategy');
 const facebookLogin = require('./facebookStrategy');
 const { setupOpenId, getOpenIdConfig } = require('./openidStrategy');
@@ -15,6 +16,7 @@ module.exports = {
   passportLogin,
   googleLogin,
   githubLogin,
+  bitrix24Login,
   discordLogin,
   jwtLogin,
   facebookLogin,

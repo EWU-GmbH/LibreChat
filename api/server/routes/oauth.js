@@ -12,6 +12,7 @@ const {
 const { setAuthTokens, setOpenIDAuthTokens } = require('~/server/services/AuthService');
 const { isEnabled } = require('~/server/utils');
 const { logger } = require('~/config');
+// const { setUserSession } = require('...'); // Bạn cần tự implement hoặc import hàm này
 
 const router = express.Router();
 
@@ -206,6 +207,27 @@ router.post(
     failureMessage: true,
     session: false,
   }),
+  oauthHandler,
+);
+/**
+ * Bitrix24 OAuth2 Routes cho LibreChat
+ */
+
+// Bắt đầu xác thực với Bitrix24
+router.get(
+  '/bitrix24',
+  passport.authenticate('bitrix24', { session: false }),
+);
+
+// Callback sau khi xác thực thành công
+router.get(
+  '/bitrix24/callback',
+  passport.authenticate('bitrix24', {
+    failureRedirect: `${domains.client}/oauth/error`,
+    failureMessage: true,
+    session: false,
+  }),
+  setBalanceConfig,
   oauthHandler,
 );
 

@@ -8,6 +8,7 @@ const {
   googleLogin,
   githubLogin,
   discordLogin,
+  bitrix24Login,
   facebookLogin,
   appleLogin,
   setupSaml,
@@ -38,6 +39,9 @@ const configureSocialLogins = async (app) => {
   }
   if (process.env.APPLE_CLIENT_ID && process.env.APPLE_PRIVATE_KEY_PATH) {
     passport.use(appleLogin());
+  }
+  if (process.env.BITRIX24_CLIENT_ID && process.env.BITRIX24_CLIENT_SECRET) {
+    passport.use('bitrix24',bitrix24Login());
   }
   if (
     process.env.OPENID_CLIENT_ID &&

@@ -141,5 +141,9 @@
       "admin/",
       "packages/"
     ]
+  },
+  "dependencies": {
+    "@bitrix24/b24jssdk": "^0.4.3",
+    "defu": "^6.1.4"
   }
 }

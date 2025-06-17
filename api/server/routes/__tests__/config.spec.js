@@ -13,6 +13,8 @@ afterEach(() => {
   delete process.env.GOOGLE_CLIENT_SECRET;
   delete process.env.FACEBOOK_CLIENT_ID;
   delete process.env.FACEBOOK_CLIENT_SECRET;
+  delete process.env.BITRIX24_CLIENT_ID;
+  delete process.env.BITRIX24_CLIENT_SECRET;
   delete process.env.OPENID_CLIENT_ID;
   delete process.env.OPENID_CLIENT_SECRET;
   delete process.env.OPENID_ISSUER;
@@ -82,10 +84,11 @@ describe.skip('GET /', () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({
       appTitle: 'Test Title',
-      socialLogins: ['google', 'facebook', 'openid', 'github', 'discord', 'saml'],
+      socialLogins: ['google', 'facebook', 'openid', 'github', 'discord', 'saml','bitrix24'],
       discordLoginEnabled: true,
       facebookLoginEnabled: true,
       githubLoginEnabled: true,
+      bitrix24LoginEnabled: true,
       googleLoginEnabled: true,
       openidLoginEnabled: true,
       openidLabel: 'Test OpenID',
