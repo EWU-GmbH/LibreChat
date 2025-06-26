@@ -82,8 +82,8 @@ router.post(
     return res.status(400).json({ error: 'Invalid Bitrix24 user info' });
   }
   try {
-      let dbUser = await User.findOne({ 'authProvider': 'bitrix24', 'authProviderId': user.id });
-      if (!dbUser && user.email) {
+      let dbUser = null;
+      if (user.email) {
         dbUser = await User.findOne({ email: user.email });
       }
       if (!dbUser) {
