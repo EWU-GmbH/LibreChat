@@ -30,6 +30,11 @@ const {
   validatePasswordReset,
 } = require('~/server/middleware');
 
+const session = require('express-session');
+const passport = require('passport');
+const User = require('../../models/User');
+const { setAuthTokens } = require('~/server/services/AuthService');
+
 const router = express.Router();
 
 const ldapAuth = !!process.env.LDAP_URL && !!process.env.LDAP_USER_SEARCH_BASE;
@@ -69,4 +74,33 @@ router.post('/2fa/confirm', requireJwtAuth, confirm2FA);
 router.post('/2fa/disable', requireJwtAuth, disable2FA);
 router.post('/2fa/backup/regenerate', requireJwtAuth, regenerateBackupCodes);
 
+router.post(
+  '/bitrix24',
+  async (req, res, next) => {
+  const { user } = req.body;
+  if (!user || !user.id) {
+    return res.status(400).json({ error: 'Invalid Bitrix24 user info' });
+  }
+  try {
+      let dbUser = await User.findOne({ 'authProvider': 'bitrix24', 'authProviderId': user.id });
+      if (!dbUser && user.email) {
+        dbUser = await User.findOne({ email: user.email });
+      }
+      if (!dbUser) {
+        dbUser = await User.create({
+          email: user.email,
+          name: `${user.name.firstName} ${user.name.lastName}`,
+          avatar: user.photo,
+          authProvider: 'bitrix24',
+          authProviderId: user.id,
+          // ...các trường khác nếu cần
+        });
+      }
+      // Đăng nhập với Passport (tạo session)
+      const token = await setAuthTokens(dbUser, res);
+      res.json({ user: dbUser, token:token });
+  } catch (error) {
+    next(error);
+  }
+});
 module.exports = router;

@@ -23,8 +23,56 @@ import {
 import { TAuthConfig, TUserContext, TAuthContext, TResError } from '~/common';
 import useTimeout from './useTimeout';
 import store from '~/store';
+import {
+	initializeB24Frame,
+	LoggerBrowser,
+	B24Frame,
+	Result,
+	EnumCrmEntityTypeId,
+	Text,
+	type ISODate
+} from '@bitrix24/b24jssdk'
 
 const AuthContext = createContext<TAuthContext | undefined>(undefined);
+
+function getBitrix24UserProfile(response) {
+  return {
+    id: parseInt(response.result.ID, 10),
+    isAdmin: response.result.ADMIN,
+    email: response.result.EMAIL,
+    name: {
+      firstName: response.result.NAME,
+      lastName: response.result.LAST_NAME,
+    },
+    gender: response.result.PERSONAL_GENDER,
+    photo: response.result.PERSONAL_PHOTO,
+    timeZone: response.result.TIME_ZONE,
+    timeZoneOffset: response.result.TIME_ZONE_OFFSET,
+  };
+}
+async function handleBitrix24Login() {
+  const b24 = await initializeB24Frame();
+  if (b24.auth.getAuthData()) {
+    const response = await b24.callMethod(
+          'user.current'
+    );
+    const token = b24.auth.getAuthData().access_token;
+    const user = getBitrix24UserProfile(response.getData());
+    const auth = await fetch('/api/auth/bitrix24', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: user}),
+      credentials: 'include', // để backend set cookie session
+    });
+    if (auth.ok) {
+      const data = await auth.json();
+      return {data};
+    } else {
+      const error = await auth.json();
+      throw new Error(error.message || 'Failed to authenticate with Bitrix24'); 
+    }
+  }
+}
 
 const AuthContextProvider = ({
   authConfig,
@@ -160,6 +208,17 @@ const AuthContextProvider = ({
   }, []);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+    handleBitrix24Login()
+      .then(result => {
+        if (result && result.data) {
+          setUserContext({ user: result.data.user, token: result.data.token,isAuthenticated: true });
+        }
+      })
+      .catch(error => {
+        setError('Không thể đăng nhập Bitrix24');
+      });
+  }
     if (userQuery.data) {
       setUser(userQuery.data);
     } else if (userQuery.isError) {
@@ -187,7 +246,6 @@ const AuthContextProvider = ({
 
   useEffect(() => {
     const handleTokenUpdate = (event) => {
-      console.log('tokenUpdated event received event');
       const newToken = event.detail;
       setUserContext({
         token: newToken,
