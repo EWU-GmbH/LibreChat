@@ -51,7 +51,7 @@ export function mapAgents(agents: t.Agent[]) {
   const agentsMap = {} as Record<string, t.Agent>;
 
   for (const agent of agents) {
-    agentsMap[agent.id] = agent;
+    agentsMap[agent.id] = { ...agent };
   }
 
   return agentsMap;
