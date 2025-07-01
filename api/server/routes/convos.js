@@ -101,8 +101,12 @@ router.delete('/', async (req, res) => {
   // Dateien zu diesem Chat löschen
   if (conversationId) {
     try {
-      const fileIds = await getConvoFiles(conversationId);
-      if (fileIds && fileIds.length > 0) {
+      const filesResult = await getConvoFiles(conversationId);
+      // filesResult kann ein Array oder ein Objekt mit files-Array sein
+      const fileIds = Array.isArray(filesResult)
+        ? filesResult
+        : (filesResult && Array.isArray(filesResult.files) ? filesResult.files : []);
+      if (fileIds.length > 0) {
         await deleteFiles(fileIds);
       }
     } catch (err) {
