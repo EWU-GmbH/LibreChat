@@ -11,6 +11,8 @@ const { deleteToolCalls } = require('~/models/ToolCall');
 const { isEnabled, sleep } = require('~/server/utils');
 const getLogStores = require('~/cache/getLogStores');
 const { logger } = require('~/config');
+const { getConvoFiles } = require('~/models/Conversation');
+const { deleteFiles } = require('~/models/File');
 
 const assistantClients = {
   [EModelEndpoint.azureAssistants]: require('~/server/services/Endpoints/azureAssistants'),
@@ -94,6 +96,19 @@ router.delete('/', async (req, res) => {
     filter = { conversationId };
   } else if (source === 'button') {
     return res.status(200).send('No conversationId provided');
+  }
+
+  // Dateien zu diesem Chat löschen
+  if (conversationId) {
+    try {
+      const fileIds = await getConvoFiles(conversationId);
+      if (fileIds && fileIds.length > 0) {
+        await deleteFiles(fileIds);
+      }
+    } catch (err) {
+      logger.error('Fehler beim Löschen der Dateien für Chat:', err);
+      // Optional: Fehler ignorieren oder Rückmeldung geben
+    }
   }
 
   if (
