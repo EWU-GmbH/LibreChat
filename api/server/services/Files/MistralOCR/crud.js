@@ -151,6 +151,13 @@ const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
       mistralModel: ocrConfig?.mistralModel || 'NICHT GESETZT'
     });
 
+    // Debug: Prüfe Umgebungsvariablen direkt
+    logger.info('[OCR] Umgebungsvariablen-Check:', {
+      AZURE_MISTRAL_OCR_API_KEY: process.env.AZURE_MISTRAL_OCR_API_KEY ? `${process.env.AZURE_MISTRAL_OCR_API_KEY.substring(0, 10)}...` : 'NICHT GESETZT',
+      OCR_API_KEY: process.env.OCR_API_KEY ? `${process.env.OCR_API_KEY.substring(0, 10)}...` : 'NICHT GESETZT',
+      OCR_BASEURL: process.env.OCR_BASEURL || 'NICHT GESETZT'
+    });
+
     const apiKeyConfig = ocrConfig.apiKey || '';
     const baseURLConfig = ocrConfig.baseURL || '';
     const usingAzEndpoint = ocrConfig.usingAzEndpoint || false;
