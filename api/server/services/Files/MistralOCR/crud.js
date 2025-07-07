@@ -127,13 +127,39 @@ async function performOCR({
  */
 
 const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
+  logger.info('[OCR] ========== OCR-Upload gestartet ==========');
+  logger.info('[OCR] Received parameters:', {
+    fileId: file_id,
+    entityId: entity_id,
+    fileName: file?.originalname,
+    filePath: file?.path,
+    fileMimetype: file?.mimetype,
+    fileSize: file?.size
+  });
+
   try {
     /** @type {TCustomConfig['ocr']} */
     const ocrConfig = req.app.locals?.ocr;
 
+    logger.info('[OCR] OCR-Konfiguration geladen:', {
+      ocrConfigExists: !!ocrConfig,
+      apiKey: ocrConfig?.apiKey ? `${ocrConfig.apiKey.substring(0, 10)}...` : 'NICHT GESETZT',
+      baseURL: ocrConfig?.baseURL || 'NICHT GESETZT',
+      usingAzEndpoint: ocrConfig?.usingAzEndpoint,
+      strategy: ocrConfig?.strategy || 'NICHT GESETZT',
+      enabled: ocrConfig?.enabled,
+      mistralModel: ocrConfig?.mistralModel || 'NICHT GESETZT'
+    });
+
     const apiKeyConfig = ocrConfig.apiKey || '';
     const baseURLConfig = ocrConfig.baseURL || '';
     const usingAzEndpoint = ocrConfig.usingAzEndpoint || false;
+
+    logger.info('[OCR] Konfigurationswerte:', {
+      apiKeyConfig: apiKeyConfig ? `${apiKeyConfig.substring(0, 10)}...` : 'LEER',
+      baseURLConfig: baseURLConfig || 'LEER',
+      usingAzEndpoint: usingAzEndpoint
+    });
 
     const isApiKeyEnvVar = envVarRegex.test(apiKeyConfig);
     const isBaseURLEnvVar = envVarRegex.test(baseURLConfig);
@@ -147,10 +173,26 @@ const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
       const apiKeyVarName = isApiKeyEnvVar ? extractVariableName(apiKeyConfig) : 'OCR_API_KEY';
       const baseURLVarName = isBaseURLEnvVar ? extractVariableName(baseURLConfig) : 'OCR_BASEURL';
 
+      logger.info('[OCR] Lade Authentifizierungswerte:', {
+        apiKeyVarName,
+        baseURLVarName,
+        isApiKeyEnvVar,
+        isBaseURLEnvVar,
+        isApiKeyEmpty,
+        isBaseURLEmpty
+      });
+
       const authValues = await loadAuthValues({
         userId: req.user.id,
         authFields: [baseURLVarName, apiKeyVarName],
         optional: new Set([baseURLVarName]),
+      });
+
+      logger.info('[OCR] Authentifizierungswerte geladen:', {
+        authValues: Object.keys(authValues).reduce((acc, key) => {
+          acc[key] = authValues[key] ? `${authValues[key].substring(0, 10)}...` : 'NICHT GESETZT';
+          return acc;
+        }, {})
       });
 
       apiKey = authValues[apiKeyVarName];
@@ -159,6 +201,11 @@ const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
       apiKey = apiKeyConfig;
       baseURL = baseURLConfig;
     }
+
+    logger.info('[OCR] Finale Authentifizierungswerte:', {
+      apiKey: apiKey ? `${apiKey.substring(0, 10)}...` : 'NICHT GESETZT',
+      baseURL: baseURL || 'NICHT GESETZT'
+    });
 
     const modelConfig = ocrConfig.mistralModel || '';
     const model = envVarRegex.test(modelConfig)
@@ -174,23 +221,33 @@ const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
     let ocrUrl;
     if (usingAzEndpoint) {
       // Azure: Datei als Base64-Data-URL übergeben
+      logger.info('[OCR] Verwende Azure-Endpoint, lese Datei als Base64...');
       const buffer = await fs.promises.readFile(file.path);
       const ext = path.extname(file.originalname).replace('.', '') || 'jpeg';
       ocrUrl = `data:image/${ext};base64,${buffer.toString('base64')}`;
+      logger.info('[OCR] Azure Base64-URL erstellt:', {
+        urlLength: ocrUrl.length,
+        extension: ext,
+        bufferSize: buffer.length
+      });
     } else {
       // Standard: Datei hochladen und Signed URL holen
+      logger.info('[OCR] Verwende Standard-Endpoint, lade Datei hoch...');
       const mistralFile = await uploadDocumentToMistral({
         filePath: file.path,
         fileName: file.originalname,
         apiKey,
         baseURL,
       });
+      logger.info('[OCR] Datei hochgeladen:', { fileId: mistralFile.id });
+      
       const signedUrlResponse = await getSignedUrl({
         apiKey,
         baseURL,
         fileId: mistralFile.id,
       });
       ocrUrl = signedUrlResponse.url;
+      logger.info('[OCR] Signed URL erhalten:', { url: signedUrlResponse.url });
     }
 
     logger.info(`[OCR] usingAzEndpoint: ${usingAzEndpoint}, baseURL: ${baseURL}, model: ${model}, file: ${file.originalname}`);
@@ -201,6 +258,12 @@ const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
       model,
       url: ocrUrl,
       documentType: usingAzEndpoint ? 'document_url' : documentType,
+    });
+
+    logger.info('[OCR] OCR erfolgreich durchgeführt:', {
+      model: ocrResult.model,
+      pagesCount: ocrResult.pages?.length || 0,
+      usageInfo: ocrResult.usage_info
     });
 
     let aggregatedText = '';
@@ -227,6 +290,18 @@ const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
       images,
     };
   } catch (error) {
+    logger.error('[OCR] Fehler bei OCR-Verarbeitung:', {
+      errorMessage: error.message,
+      errorStack: error.stack,
+      responseStatus: error?.response?.status,
+      responseData: error?.response?.data,
+      apiKey: apiKey ? `${apiKey.substring(0, 10)}...` : 'NICHT GESETZT',
+      baseURL: baseURL || 'NICHT GESETZT',
+      usingAzEndpoint: usingAzEndpoint,
+      filePath: file?.path,
+      fileName: file?.originalname
+    });
+
     let message = 'Error uploading document to Mistral OCR API';
     const detail = error?.response?.data?.detail;
     if (detail && detail !== '') {

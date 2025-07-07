@@ -473,6 +473,17 @@ const processFileUpload = async ({ req, res, metadata }) => {
 const processAgentFileUpload = async ({ req, res, metadata }) => {
   const { file } = req;
   const { agent_id, tool_resource } = metadata;
+  
+  logger.info('[FILE] processAgentFileUpload gestartet:', {
+    fileName: file?.originalname,
+    filePath: file?.path,
+    fileMimetype: file?.mimetype,
+    fileSize: file?.size,
+    agentId: agent_id,
+    toolResource: tool_resource,
+    metadata
+  });
+
   if (agent_id && !tool_resource) {
     throw new Error('No tool resource provided for agent file upload');
   }
@@ -517,15 +528,32 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
       throw new Error('File search is not enabled for Agents');
     }
   } else if (tool_resource === EToolResources.ocr) {
+    logger.info('[OCR] OCR-Tool-Resource erkannt, überprüfe Capabilities...');
+    
     const isOCREnabled = await checkCapability(req, AgentCapabilities.ocr);
+    logger.info('[OCR] OCR-Capability-Check:', { isOCREnabled });
+    
     if (!isOCREnabled) {
+      logger.error('[OCR] OCR capability is not enabled for Agents');
       throw new Error('OCR capability is not enabled for Agents');
     }
 
-    const { handleFileUpload: uploadMistralOCR } = getStrategyFunctions(
-      req.app.locals?.ocr?.strategy ?? FileSources.mistral_ocr,
-    );
+    logger.info('[OCR] OCR-Capability aktiviert, lade Strategy-Funktionen...');
+    
+    const ocrStrategy = req.app.locals?.ocr?.strategy ?? FileSources.mistral_ocr;
+    logger.info('[OCR] OCR-Strategy:', { ocrStrategy });
+
+    const { handleFileUpload: uploadMistralOCR } = getStrategyFunctions(ocrStrategy);
     const { file_id, temp_file_id } = metadata;
+
+    logger.info('[OCR] Starte OCR-Upload mit Parametern:', {
+      file_id,
+      temp_file_id,
+      fileName: file?.originalname,
+      filePath: file?.path,
+      agentId: agent_id,
+      basePath
+    });
 
     const {
       text,
