@@ -193,6 +193,8 @@ const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
       ocrUrl = signedUrlResponse.url;
     }
 
+    logger.info(`[OCR] usingAzEndpoint: ${usingAzEndpoint}, baseURL: ${baseURL}, model: ${model}, file: ${file.originalname}`);
+
     const ocrResult = await performOCR({
       apiKey,
       baseURL,
