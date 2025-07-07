@@ -125,6 +125,7 @@ async function performOCR({
  * @returns {Promise<{ filepath: string, bytes: number }>} - The result object containing the processed `text` and `images` (not currently used),
  *                       along with the `filename` and `bytes` properties.
  */
+
 const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
   try {
     /** @type {TCustomConfig['ocr']} */
@@ -132,6 +133,7 @@ const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
 
     const apiKeyConfig = ocrConfig.apiKey || '';
     const baseURLConfig = ocrConfig.baseURL || '';
+    const usingAzEndpoint = ocrConfig.usingAzEndpoint || false;
 
     const isApiKeyEnvVar = envVarRegex.test(apiKeyConfig);
     const isBaseURLEnvVar = envVarRegex.test(baseURLConfig);
@@ -158,23 +160,10 @@ const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
       baseURL = baseURLConfig;
     }
 
-    const mistralFile = await uploadDocumentToMistral({
-      filePath: file.path,
-      fileName: file.originalname,
-      apiKey,
-      baseURL,
-    });
-
     const modelConfig = ocrConfig.mistralModel || '';
     const model = envVarRegex.test(modelConfig)
       ? extractEnvVariable(modelConfig)
       : modelConfig.trim() || 'mistral-ocr-latest';
-
-    const signedUrlResponse = await getSignedUrl({
-      apiKey,
-      baseURL,
-      fileId: mistralFile.id,
-    });
 
     const mimetype = (file.mimetype || '').toLowerCase();
     const originalname = file.originalname || '';
@@ -182,12 +171,34 @@ const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
       mimetype.startsWith('image') || /\.(png|jpe?g|gif|bmp|webp|tiff?)$/i.test(originalname);
     const documentType = isImage ? 'image_url' : 'document_url';
 
+    let ocrUrl;
+    if (usingAzEndpoint) {
+      // Azure: Datei als Base64-Data-URL übergeben
+      const buffer = await fs.promises.readFile(file.path);
+      const ext = path.extname(file.originalname).replace('.', '') || 'jpeg';
+      ocrUrl = `data:image/${ext};base64,${buffer.toString('base64')}`;
+    } else {
+      // Standard: Datei hochladen und Signed URL holen
+      const mistralFile = await uploadDocumentToMistral({
+        filePath: file.path,
+        fileName: file.originalname,
+        apiKey,
+        baseURL,
+      });
+      const signedUrlResponse = await getSignedUrl({
+        apiKey,
+        baseURL,
+        fileId: mistralFile.id,
+      });
+      ocrUrl = signedUrlResponse.url;
+    }
+
     const ocrResult = await performOCR({
       apiKey,
       baseURL,
       model,
-      url: signedUrlResponse.url,
-      documentType,
+      url: ocrUrl,
+      documentType: usingAzEndpoint ? 'document_url' : documentType,
     });
 
     let aggregatedText = '';
@@ -196,9 +207,7 @@ const uploadMistralOCR = async ({ req, file, file_id, entity_id }) => {
       if (ocrResult.pages.length > 1) {
         aggregatedText += `# PAGE ${index + 1}\n`;
       }
-
       aggregatedText += page.markdown + '\n\n';
-
       if (page.images && page.images.length > 0) {
         page.images.forEach((image) => {
           if (image.image_base64) {
