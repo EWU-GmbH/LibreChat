@@ -292,6 +292,12 @@ const processFileURL = async ({ fileStrategy, userId, URL, fileName, basePath, c
  * @returns {Promise<void>}
  */
 const processImageFile = async ({ req, res, metadata, returnFile = false }) => {
+  logger.info('[FILE] processImageFile aufgerufen:', {
+    fileName: req.file?.originalname,
+    metadata,
+    returnFile
+  });
+
   const { file } = req;
   const source = req.app.locals.fileStrategy;
   const { handleImageUpload } = getStrategyFunctions(source);
@@ -384,6 +390,12 @@ const uploadImageBuffer = async ({ req, context, metadata = {}, resize = true })
  * @returns {Promise<void>}
  */
 const processFileUpload = async ({ req, res, metadata }) => {
+  logger.info('[FILE] processFileUpload aufgerufen:', {
+    fileName: req.file?.originalname,
+    fileMimetype: req.file?.mimetype,
+    metadata
+  });
+
   const isAssistantUpload = isAssistantsEndpoint(metadata.endpoint);
   const assistantSource =
     metadata.endpoint === EModelEndpoint.azureAssistants ? FileSources.azure : FileSources.openai;

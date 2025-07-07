@@ -264,6 +264,15 @@ router.post('/', async (req, res) => {
   const metadata = req.body;
   let cleanup = true;
 
+  logger.info('[FILES] Datei-Upload-Request erhalten:', {
+    fileName: req.file?.originalname,
+    fileMimetype: req.file?.mimetype,
+    fileSize: req.file?.size,
+    metadata: metadata,
+    endpoint: metadata?.endpoint,
+    isAgentsEndpoint: metadata?.endpoint ? isAgentsEndpoint(metadata.endpoint) : 'NO_ENDPOINT'
+  });
+
   try {
     filterFile({ req });
 
