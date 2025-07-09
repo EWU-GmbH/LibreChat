@@ -32,7 +32,7 @@ const {
 
 const session = require('express-session');
 const passport = require('passport');
-const User = require('../../models/User');
+const { User } = require('~/db/models');
 const { setAuthTokens } = require('~/server/services/AuthService');
 
 const router = express.Router();
