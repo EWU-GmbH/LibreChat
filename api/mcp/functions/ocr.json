@@ -1,0 +1,19 @@
+{
+  "name": "ocr_image",
+  "description": "Extrahiert Text aus einem Bild mittels OCR.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "image_url": {
+        "type": "string",
+        "description": "Die URL des zu analysierenden Bildes"
+      }
+    },
+    "required": ["image_url"]
+  },
+  "endpoint": "https://librechat-ocr-function-production.up.railway.app/api/ocr",
+  "method": "POST",
+  "requestBody": {
+    "image_url": "{{image_url}}"
+  }
+}
