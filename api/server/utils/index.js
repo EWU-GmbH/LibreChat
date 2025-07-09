@@ -4,6 +4,7 @@ const handleText = require('./handleText');
 const sendEmail = require('./sendEmail');
 const queue = require('./queue');
 const files = require('./files');
+const bitrix24 = require('./bitrix24');
 
 /**
  * Check if email configuration is set
@@ -33,4 +34,5 @@ module.exports = {
   sendEmail,
   ...files,
   ...queue,
+  bitrix24,
 };
