@@ -2,7 +2,7 @@ const OAuth2Strategy = require('passport-oauth2');
 const passport = require('passport');
 const { handleBitrix24OAuth } = require('../server/utils/bitrix24');
 const { logger } = require('~/config');
-const User = require('../models/User'); // Đường dẫn tới model User của bạn
+const { User } = require('~/db/models'); // Korrigierter Import für die neue Version
 
 module.exports = function bitrix24Login() {
   return new OAuth2Strategy(
