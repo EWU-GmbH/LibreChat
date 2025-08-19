@@ -111,7 +111,27 @@ router.delete('/', async (req, res) => {
   if (fullDelete && conversationId) {
     try {
       const convoFileIds = await getConvoFiles(conversationId);
-      const fileIds = Array.isArray(convoFileIds) ? convoFileIds : [];
+      const fileIdSet = new Set(Array.isArray(convoFileIds) ? convoFileIds : []);
+
+      // Message-level attachments einsammeln
+      try {
+        const { getMessages } = require('~/models/Message');
+        const msgs = await getMessages({ conversationId, user: req.user.id }, 'files');
+        for (const m of msgs) {
+          if (Array.isArray(m.files)) {
+            for (const f of m.files) {
+              if (!f) continue;
+              if (typeof f === 'string') fileIdSet.add(f);
+              else if (f.file_id) fileIdSet.add(f.file_id);
+              else if (f.fileId) fileIdSet.add(f.fileId);
+            }
+          }
+        }
+      } catch (msgErr) {
+        logger.warn('Konnte Message-Dateien nicht sammeln:', msgErr.message);
+      }
+
+      const fileIds = Array.from(fileIdSet);
       if (fileIds.length) {
         // Dateien aus Mongo holen (wir brauchen embedded, source, filepath usw.)
         const { getFiles } = require('~/models/File');
@@ -119,6 +139,7 @@ router.delete('/', async (req, res) => {
 
         // Referenzprüfung: Prüfen ob Datei in anderen Konversationen genutzt wird
         const { Conversation } = require('~/db/models');
+        const { Message } = require('~/db/models');
         const otherRefs = await Conversation.find({
           conversationId: { $ne: conversationId },
           files: { $in: fileIds },
@@ -126,6 +147,13 @@ router.delete('/', async (req, res) => {
         })
           .select('conversationId files')
           .lean();
+
+        // Messages anderer Konversationen durchgehen
+        const otherMsgRefs = await Message.find({
+          conversationId: { $ne: conversationId },
+          user: req.user.id,
+          files: { $exists: true, $ne: [] },
+        }).select('files conversationId').lean();
         const referencedElsewhere = new Set();
         if (otherRefs?.length) {
             for (const f of fileIds) {
@@ -133,6 +161,18 @@ router.delete('/', async (req, res) => {
                 referencedElsewhere.add(f);
               }
             }
+        }
+        if (otherMsgRefs?.length) {
+          for (const m of otherMsgRefs) {
+            if (Array.isArray(m.files)) {
+              for (const f of m.files) {
+                const fid = typeof f === 'string' ? f : (f?.file_id || f?.fileId);
+                if (fid && fileIdSet.has(fid)) {
+                  referencedElsewhere.add(fid);
+                }
+              }
+            }
+          }
         }
 
         // Vector-Batch löschen (nur nicht mehrfach referenzierte & embedded)
@@ -181,6 +221,21 @@ router.delete('/', async (req, res) => {
           }
         }
 
+        // File-Dokumente für Dateien ohne Fremdreferenz löschen
+        try {
+          const removableIds = mongoFiles
+            .filter((f) => !referencedElsewhere.has(f.file_id))
+            .map((f) => f.file_id);
+          if (removableIds.length) {
+            const delRes = await deleteFiles(removableIds);
+            fileCleanupReport.mongoFileDocsDeleted = delRes.deletedCount;
+          } else {
+            fileCleanupReport.mongoFileDocsDeleted = 0;
+          }
+        } catch (delErr) {
+          logger.error('Fehler beim Löschen der File-Dokumente:', delErr);
+        }
+
         fileCleanupReport = {
           totalFiles: fileIds.length,
             referencedElsewhere: Array.from(referencedElsewhere),
@@ -212,7 +267,7 @@ router.delete('/', async (req, res) => {
 
   try {
     const dbResponse = await deleteConvos(req.user.id, filter, {
-      skipFileDeletion: fullDelete, // wir haben Files bereits behandelt
+      skipFileDeletion: true, // File-Dokumente wurden (soweit möglich) oben entfernt
       skipFileCollection: false,
     });
     if (fullDelete) {
