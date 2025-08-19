@@ -104,20 +104,89 @@ router.delete('/', async (req, res) => {
     return res.status(200).send('No conversationId provided');
   }
 
-  // Dateien zu diesem Chat löschen
-  if (conversationId) {
+  // Erweiterte Löschung (Vector + physische Dateien) gesteuert über ENV Flag FULL_CONVO_DELETE
+  const fullDelete = process.env.FULL_CONVO_DELETE === '1' || process.env.FULL_CONVO_DELETE === 'true';
+  let fileCleanupReport = {};
+  if (fullDelete && conversationId) {
     try {
-      const filesResult = await getConvoFiles(conversationId);
-      // filesResult kann ein Array oder ein Objekt mit files-Array sein
-      const fileIds = Array.isArray(filesResult)
-        ? filesResult
-        : (filesResult && Array.isArray(filesResult.files) ? filesResult.files : []);
-      if (fileIds.length > 0) {
-        await deleteFiles(fileIds);
+      const convoFileIds = await getConvoFiles(conversationId);
+      const fileIds = Array.isArray(convoFileIds) ? convoFileIds : [];
+      if (fileIds.length) {
+        // Dateien aus Mongo holen (wir brauchen embedded, source, filepath usw.)
+        const { getFiles } = require('~/models/File');
+        const mongoFiles = await getFiles({ file_id: { $in: fileIds } }, undefined, undefined);
+
+        // Referenzprüfung: Prüfen ob Datei in anderen Konversationen genutzt wird
+        const { Conversation } = require('~/db/models');
+        const otherRefs = await Conversation.find({
+          conversationId: { $ne: conversationId },
+          files: { $in: fileIds },
+          user: req.user.id,
+        })
+          .select('conversationId files')
+          .lean();
+        const referencedElsewhere = new Set();
+        if (otherRefs?.length) {
+            for (const f of fileIds) {
+              if (otherRefs.some((c) => Array.isArray(c.files) && c.files.includes(f))) {
+                referencedElsewhere.add(f);
+              }
+            }
+        }
+
+        // Vector-Batch löschen (nur nicht mehrfach referenzierte & embedded)
+        const vectorIds = mongoFiles
+          .filter((f) => f.embedded && !referencedElsewhere.has(f.file_id))
+          .map((f) => f.file_id);
+        let vectorResult;
+        if (vectorIds.length && process.env.RAG_API_URL) {
+          try {
+            const axios = require('axios');
+            const { generateShortLivedToken } = require('~/server/services/AuthService');
+            const jwtToken = generateShortLivedToken(req.user.id);
+            vectorResult = await axios.delete(`${process.env.RAG_API_URL}/documents`, {
+              headers: {
+                Authorization: `Bearer ${jwtToken}`,
+                'Content-Type': 'application/json',
+                accept: 'application/json',
+              },
+              data: vectorIds,
+            });
+          } catch (err) {
+            logger.warn('Batch Vector-Löschung fehlgeschlagen', err.message);
+          }
+        }
+
+        // Physische Dateien löschen über Strategy (wenn nicht referenziert)
+        const { getStrategyFunctions } = require('~/server/services/Files/strategies');
+        const deletedPhysical = []; const skippedPhysical = []; const physicalErrors = [];
+        for (const f of mongoFiles) {
+          if (referencedElsewhere.has(f.file_id)) { skippedPhysical.push(f.file_id); continue; }
+          try {
+            if (f.source) {
+              const { deleteFile } = getStrategyFunctions(f.source);
+              if (deleteFile) {
+                await deleteFile(req, f);
+                deletedPhysical.push(f.file_id);
+              } else { skippedPhysical.push(f.file_id); }
+            } else { skippedPhysical.push(f.file_id); }
+          } catch (perr) {
+            physicalErrors.push({ file_id: f.file_id, error: perr.message });
+          }
+        }
+
+        fileCleanupReport = {
+          totalFiles: fileIds.length,
+            referencedElsewhere: Array.from(referencedElsewhere),
+          vectorDeleted: vectorIds,
+          physicalDeleted: deletedPhysical,
+          physicalSkipped: skippedPhysical,
+          physicalErrors,
+        };
       }
     } catch (err) {
-      logger.error('Fehler beim Löschen der Dateien für Chat:', err);
-      // Optional: Fehler ignorieren oder Rückmeldung geben
+      logger.error('Erweiterte Dateilöschung fehlgeschlagen', err);
+      fileCleanupReport.error = err.message;
     }
   }
 
@@ -136,7 +205,13 @@ router.delete('/', async (req, res) => {
   }
 
   try {
-    const dbResponse = await deleteConvos(req.user.id, filter);
+    const dbResponse = await deleteConvos(req.user.id, filter, {
+      skipFileDeletion: fullDelete, // wir haben Files bereits behandelt
+      skipFileCollection: false,
+    });
+    if (fullDelete) {
+      dbResponse.extendedFileCleanup = fileCleanupReport;
+    }
     await deleteToolCalls(req.user.id, filter.conversationId);
     res.status(201).json(dbResponse);
   } catch (error) {
