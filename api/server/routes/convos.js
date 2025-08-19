@@ -13,6 +13,7 @@ const getLogStores = require('~/cache/getLogStores');
 const { logger } = require('~/config');
 const { getConvoFiles } = require('~/models/Conversation');
 const { deleteFiles } = require('~/models/File');
+const { FileSources } = require('librechat-data-provider');
 
 const assistantClients = {
   [EModelEndpoint.azureAssistants]: require('~/server/services/Endpoints/azureAssistants'),
@@ -164,6 +165,11 @@ router.delete('/', async (req, res) => {
           if (referencedElsewhere.has(f.file_id)) { skippedPhysical.push(f.file_id); continue; }
           try {
             if (f.source) {
+              // Vectordb-Dateien wurden bereits im Batch (vectorIds) gelöscht -> doppelte 404 vermeiden
+              if (f.source === FileSources.vectordb && vectorIds.includes(f.file_id)) {
+                skippedPhysical.push(f.file_id); // Als übersprungen markieren (bereits gelöscht)
+                continue;
+              }
               const { deleteFile } = getStrategyFunctions(f.source);
               if (deleteFile) {
                 await deleteFile(req, f);
