@@ -13,6 +13,7 @@ const getLogStores = require('~/cache/getLogStores');
 const { logger } = require('~/config');
 const { getConvoFiles } = require('~/models/Conversation');
 const { deleteFiles } = require('~/models/File');
+const { FileSources } = require('librechat-data-provider');
 
 const assistantClients = {
   [EModelEndpoint.azureAssistants]: require('~/server/services/Endpoints/azureAssistants'),
@@ -104,20 +105,149 @@ router.delete('/', async (req, res) => {
     return res.status(200).send('No conversationId provided');
   }
 
-  // Dateien zu diesem Chat löschen
-  if (conversationId) {
+  // Erweiterte Löschung (Vector + physische Dateien) gesteuert über ENV Flag FULL_CONVO_DELETE
+  const fullDelete = process.env.FULL_CONVO_DELETE === '1' || process.env.FULL_CONVO_DELETE === 'true';
+  let fileCleanupReport = {};
+  if (fullDelete && conversationId) {
     try {
-      const filesResult = await getConvoFiles(conversationId);
-      // filesResult kann ein Array oder ein Objekt mit files-Array sein
-      const fileIds = Array.isArray(filesResult)
-        ? filesResult
-        : (filesResult && Array.isArray(filesResult.files) ? filesResult.files : []);
-      if (fileIds.length > 0) {
-        await deleteFiles(fileIds);
+      const convoFileIds = await getConvoFiles(conversationId);
+      const fileIdSet = new Set(Array.isArray(convoFileIds) ? convoFileIds : []);
+
+      // Message-level attachments einsammeln
+      try {
+        const { getMessages } = require('~/models/Message');
+        const msgs = await getMessages({ conversationId, user: req.user.id }, 'files');
+        for (const m of msgs) {
+          if (Array.isArray(m.files)) {
+            for (const f of m.files) {
+              if (!f) continue;
+              if (typeof f === 'string') fileIdSet.add(f);
+              else if (f.file_id) fileIdSet.add(f.file_id);
+              else if (f.fileId) fileIdSet.add(f.fileId);
+            }
+          }
+        }
+      } catch (msgErr) {
+        logger.warn('Konnte Message-Dateien nicht sammeln:', msgErr.message);
+      }
+
+      const fileIds = Array.from(fileIdSet);
+      if (fileIds.length) {
+        // Dateien aus Mongo holen (wir brauchen embedded, source, filepath usw.)
+        const { getFiles } = require('~/models/File');
+        const mongoFiles = await getFiles({ file_id: { $in: fileIds } }, undefined, undefined);
+
+        // Referenzprüfung: Prüfen ob Datei in anderen Konversationen genutzt wird
+        const { Conversation } = require('~/db/models');
+        const { Message } = require('~/db/models');
+        const otherRefs = await Conversation.find({
+          conversationId: { $ne: conversationId },
+          files: { $in: fileIds },
+          user: req.user.id,
+        })
+          .select('conversationId files')
+          .lean();
+
+        // Messages anderer Konversationen durchgehen
+        const otherMsgRefs = await Message.find({
+          conversationId: { $ne: conversationId },
+          user: req.user.id,
+          files: { $exists: true, $ne: [] },
+        }).select('files conversationId').lean();
+        const referencedElsewhere = new Set();
+        if (otherRefs?.length) {
+            for (const f of fileIds) {
+              if (otherRefs.some((c) => Array.isArray(c.files) && c.files.includes(f))) {
+                referencedElsewhere.add(f);
+              }
+            }
+        }
+        if (otherMsgRefs?.length) {
+          for (const m of otherMsgRefs) {
+            if (Array.isArray(m.files)) {
+              for (const f of m.files) {
+                const fid = typeof f === 'string' ? f : (f?.file_id || f?.fileId);
+                if (fid && fileIdSet.has(fid)) {
+                  referencedElsewhere.add(fid);
+                }
+              }
+            }
+          }
+        }
+
+        // Vector-Batch löschen (nur nicht mehrfach referenzierte & embedded)
+        const vectorIds = mongoFiles
+          .filter((f) => f.embedded && !referencedElsewhere.has(f.file_id))
+          .map((f) => f.file_id);
+        let vectorResult;
+        if (vectorIds.length && process.env.RAG_API_URL) {
+          try {
+            const axios = require('axios');
+            const { generateShortLivedToken } = require('~/server/services/AuthService');
+            const jwtToken = generateShortLivedToken(req.user.id);
+            vectorResult = await axios.delete(`${process.env.RAG_API_URL}/documents`, {
+              headers: {
+                Authorization: `Bearer ${jwtToken}`,
+                'Content-Type': 'application/json',
+                accept: 'application/json',
+              },
+              data: vectorIds,
+            });
+          } catch (err) {
+            logger.warn('Batch Vector-Löschung fehlgeschlagen', err.message);
+          }
+        }
+
+        // Physische Dateien löschen über Strategy (wenn nicht referenziert)
+        const { getStrategyFunctions } = require('~/server/services/Files/strategies');
+        const deletedPhysical = []; const skippedPhysical = []; const physicalErrors = [];
+        for (const f of mongoFiles) {
+          if (referencedElsewhere.has(f.file_id)) { skippedPhysical.push(f.file_id); continue; }
+          try {
+            if (f.source) {
+              // Vectordb-Dateien wurden bereits im Batch (vectorIds) gelöscht -> doppelte 404 vermeiden
+              if (f.source === FileSources.vectordb && vectorIds.includes(f.file_id)) {
+                skippedPhysical.push(f.file_id); // Als übersprungen markieren (bereits gelöscht)
+                continue;
+              }
+              const { deleteFile } = getStrategyFunctions(f.source);
+              if (deleteFile) {
+                await deleteFile(req, f);
+                deletedPhysical.push(f.file_id);
+              } else { skippedPhysical.push(f.file_id); }
+            } else { skippedPhysical.push(f.file_id); }
+          } catch (perr) {
+            physicalErrors.push({ file_id: f.file_id, error: perr.message });
+          }
+        }
+
+        // File-Dokumente für Dateien ohne Fremdreferenz löschen
+        try {
+          const removableIds = mongoFiles
+            .filter((f) => !referencedElsewhere.has(f.file_id))
+            .map((f) => f.file_id);
+          if (removableIds.length) {
+            const delRes = await deleteFiles(removableIds);
+            fileCleanupReport.mongoFileDocsDeleted = delRes.deletedCount;
+          } else {
+            fileCleanupReport.mongoFileDocsDeleted = 0;
+          }
+        } catch (delErr) {
+          logger.error('Fehler beim Löschen der File-Dokumente:', delErr);
+        }
+
+        fileCleanupReport = {
+          totalFiles: fileIds.length,
+            referencedElsewhere: Array.from(referencedElsewhere),
+          vectorDeleted: vectorIds,
+          physicalDeleted: deletedPhysical,
+          physicalSkipped: skippedPhysical,
+          physicalErrors,
+        };
       }
     } catch (err) {
-      logger.error('Fehler beim Löschen der Dateien für Chat:', err);
-      // Optional: Fehler ignorieren oder Rückmeldung geben
+      logger.error('Erweiterte Dateilöschung fehlgeschlagen', err);
+      fileCleanupReport.error = err.message;
     }
   }
 
@@ -136,7 +266,13 @@ router.delete('/', async (req, res) => {
   }
 
   try {
-    const dbResponse = await deleteConvos(req.user.id, filter);
+    const dbResponse = await deleteConvos(req.user.id, filter, {
+      skipFileDeletion: true, // File-Dokumente wurden (soweit möglich) oben entfernt
+      skipFileCollection: false,
+    });
+    if (fullDelete) {
+      dbResponse.extendedFileCleanup = fileCleanupReport;
+    }
     await deleteToolCalls(req.user.id, filter.conversationId);
     res.status(201).json(dbResponse);
   } catch (error) {

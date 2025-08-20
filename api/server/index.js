@@ -145,6 +145,19 @@ const startServer = async () => {
     }
 
     initializeMCP(app);
+
+    /* Hintergrund-Job: Verwaiste Dateien bereinigen */
+    if (process.env.CLEANUP_ORPHAN_FILES_INTERVAL_MIN) {
+      const minutes = Number(process.env.CLEANUP_ORPHAN_FILES_INTERVAL_MIN);
+      if (!isNaN(minutes) && minutes > 0) {
+        const intervalMs = minutes * 60 * 1000;
+        logger.info(`Orphan File Cleanup aktiviert (Intervall ${minutes} min).`);
+        const { scheduleOrphanFileCleanup } = require('~/server/utils/orphanFiles');
+        scheduleOrphanFileCleanup({ app, intervalMs });
+      } else {
+        logger.warn('CLEANUP_ORPHAN_FILES_INTERVAL_MIN ist gesetzt aber invalid.');
+      }
+    }
   });
 };
 

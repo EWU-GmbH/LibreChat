@@ -2,6 +2,7 @@ const { logger } = require('@librechat/data-schemas');
 const { createTempChatExpirationDate } = require('@librechat/api');
 const getCustomConfig = require('~/server/services/Config/loadCustomConfig');
 const { getMessages, deleteMessages } = require('./Message');
+const { deleteFiles } = require('./File');
 const { Conversation } = require('~/db/models');
 
 /**
@@ -290,14 +291,47 @@ module.exports = {
    * const result = await deleteConvos(user, filter);
    * logger.error(result); // { n: 5, ok: 1, deletedCount: 5, messages: { n: 10, ok: 1, deletedCount: 10 } }
    */
-  deleteConvos: async (user, filter) => {
+  deleteConvos: async (user, filter, options = {}) => {
     try {
       const userFilter = { ...filter, user };
-      const conversations = await Conversation.find(userFilter).select('conversationId');
+      // Fetch conversations with file references prior to deletion
+      const conversations = await Conversation.find(userFilter).select('conversationId files');
       const conversationIds = conversations.map((c) => c.conversationId);
 
       if (!conversationIds.length) {
         throw new Error('Conversation not found or already deleted.');
+      }
+
+      let allFileIds = [];
+      if (!options.skipFileCollection) {
+        /* Collect all related file_ids (conversation-level + message-level attachments) */
+        try {
+          for (const convo of conversations) {
+            if (Array.isArray(convo.files)) {
+              allFileIds.push(...convo.files.filter(Boolean));
+            }
+          }
+          const messageDocs = await getMessages(
+            { conversationId: { $in: conversationIds }, user },
+            'files',
+          );
+          for (const msg of messageDocs) {
+            if (!msg || !Array.isArray(msg.files)) continue;
+            for (const f of msg.files) {
+              if (!f) continue;
+              if (typeof f === 'string') {
+                allFileIds.push(f);
+              } else if (typeof f === 'object' && f.file_id) {
+                allFileIds.push(f.file_id);
+              } else if (typeof f === 'object' && f.fileId) {
+                allFileIds.push(f.fileId);
+              }
+            }
+          }
+          allFileIds = [...new Set(allFileIds)];
+        } catch (collectErr) {
+          logger.error('[deleteConvos] Error collecting related file ids', collectErr);
+        }
       }
 
       const deleteConvoResult = await Conversation.deleteMany(userFilter);
@@ -306,7 +340,15 @@ module.exports = {
         conversationId: { $in: conversationIds },
       });
 
-      return { ...deleteConvoResult, messages: deleteMessagesResult };
+      let deleteFilesResult = null;
+      if (!options.skipFileDeletion && allFileIds.length) {
+        try {
+          deleteFilesResult = await deleteFiles(allFileIds);
+        } catch (fileDelErr) {
+          logger.error('[deleteConvos] Error deleting related files', fileDelErr);
+        }
+      }
+      return { ...deleteConvoResult, messages: deleteMessagesResult, files: { deletedFileIds: allFileIds, result: deleteFilesResult } };
     } catch (error) {
       logger.error('[deleteConvos] Error deleting conversations and messages', error);
       throw error;
