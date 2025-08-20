@@ -96,8 +96,14 @@ const getAgentHandler = async (req, res) => {
 
     const globalProject = await getProjectByName(Constants.GLOBAL_PROJECT_NAME, ['agentIds']);
     if (globalProject && (globalProject.agentIds?.length ?? 0) > 0) {
+      // Correct logic: allow access if (a) user is author OR (b) agent id is in global project list.
+      // Previous code used an invalid filter `{ id, $in: [...] }` which MongoDB ignores / misinterprets,
+      // leading to false 404 responses for globally shared agents.
       query = {
-        $or: [{ id, $in: globalProject.agentIds }, query],
+        $or: [
+          { id: { $in: globalProject.agentIds } }, // global visibility
+          { id, author }, // author's own agent
+        ],
       };
     }
 
