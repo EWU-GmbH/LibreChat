@@ -1,0 +1,12 @@
+{
+  "name": "LibreChat",
+  "install": "bash .cursor/setup/install.sh",
+  "start": "bash .cursor/setup/start.sh",
+  "terminals": [
+    {
+      "name": "backend",
+      "command": "npm run backend:dev"
+    }
+  ],
+  "ports": [3080]
+}

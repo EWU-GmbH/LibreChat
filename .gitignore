@@ -54,7 +54,10 @@ bower_components/
 
 # AI
 .clineignore
-.cursor
+.cursor/*
+# Keep the Cloud Agent environment definition tracked.
+!.cursor/environment.json
+!.cursor/setup
 .aider*
 
 # Floobits
