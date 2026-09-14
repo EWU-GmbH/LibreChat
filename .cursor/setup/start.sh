@@ -14,6 +14,15 @@ source "$REPO_ROOT/.cursor/setup/docker-lib.sh"
 
 ensure_dockerd
 
+# The install phase builds node_modules, the client bundle, and generates
+# .env / librechat.yaml. Those are untracked, so a boot-time git checkout
+# (default_checkout) can discard them even when booting from a prebuilt
+# environment. Rebuild them here if they are missing so the app is runnable.
+if [ ! -d node_modules ] || [ ! -f client/dist/index.html ] || [ ! -f .env ]; then
+  echo "==> App artifacts missing after checkout; rebuilding"
+  bash "$REPO_ROOT/.cursor/setup/build-app.sh"
+fi
+
 # MongoDB
 ensure_container mongodb --network host \
   -v mongo_data:/data/db \
