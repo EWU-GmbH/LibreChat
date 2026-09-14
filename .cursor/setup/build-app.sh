@@ -27,7 +27,7 @@ fi
 if [ ! -f librechat.yaml ]; then
   echo "==> Creating librechat.yaml"
   cat > librechat.yaml <<'YAML'
-version: 1.2.6
+version: 1.3.13
 
 interface:
   endpointsMenu: true
