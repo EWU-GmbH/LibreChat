@@ -204,6 +204,13 @@ function collectProviderFileNames(value, names = new Set()) {
     }
   }
 
+  if (value.type === 'text' && typeof value.text === 'string') {
+    const match = value.text.match(/^File:\s*"([^"]+)"\n\n/);
+    if (match?.[1]) {
+      names.add(match[1]);
+    }
+  }
+
   for (const child of Object.values(value)) {
     collectProviderFileNames(child, names);
   }
