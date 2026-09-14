@@ -919,11 +919,12 @@ describe('encodeAndFormatDocuments - fileConfig integration', () => {
       expect(result.files).toHaveLength(1);
     });
 
-    it('should format text/plain for standard OpenAI-like provider as file block', async () => {
+    it('should format text/plain for standard OpenAI-like provider as inline text block', async () => {
       const req = createMockRequest(15) as ServerRequest;
       const file = createMockDocFile(1, 'text/plain', 'readme.txt');
 
-      const mockContent = Buffer.from('readme content').toString('base64');
+      const decodedText = 'readme content';
+      const mockContent = Buffer.from(decodedText).toString('base64');
       mockedGetFileStream.mockResolvedValue({
         file,
         content: mockContent,
@@ -939,12 +940,10 @@ describe('encodeAndFormatDocuments - fileConfig integration', () => {
 
       expect(result.documents).toHaveLength(1);
       expect(result.documents[0]).toMatchObject({
-        type: 'file',
-        file: {
-          filename: 'readme.txt',
-          file_data: `data:text/plain;base64,${mockContent}`,
-        },
+        type: 'text',
+        text: `File: "readme.txt"\n\n${decodedText}`,
       });
+      expect(result.documents[0]).not.toHaveProperty('file');
       expect(result.files).toHaveLength(1);
     });
 
