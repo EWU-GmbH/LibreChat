@@ -24,6 +24,21 @@ const ANTHROPIC_CITATION_TYPES = new Set([
 ]);
 
 /**
+ * Text-decodable document types that are inlined as a `text` content part for
+ * OpenAI-compatible providers, because Mistral's OpenAI-compatible endpoint
+ * rejects the `type: "file"` content part (HTTP 422).
+ */
+const TEXT_INLINE_MIME_TYPES = new Set([
+  'text/plain',
+  'text/markdown',
+  'text/html',
+  'text/css',
+  'text/javascript',
+  'text/csv',
+  'application/json',
+]);
+
+/**
  * Formats a base64-encoded document into the appropriate provider-specific block.
  * Returns `null` when the provider has no matching handler.
  */
@@ -74,6 +89,17 @@ function formatDocumentBlock(
   }
 
   if (isOpenAILikeProvider(provider) && provider !== Providers.AZURE) {
+    // Mistral's OpenAI-compatible /chat/completions rejects the `type: "file"`
+    // content part with a bodiless HTTP 422. Text-decodable documents are safe
+    // to inline as a `text` part, which every OpenAI-compatible provider
+    // (OpenAI, Mistral, and other custom endpoints) accepts.
+    if (TEXT_INLINE_MIME_TYPES.has(mimeType)) {
+      const text = Buffer.from(content, 'base64').toString('utf-8');
+      return {
+        type: 'text',
+        text: filename ? `File: "${filename}"\n\n${text}` : text,
+      };
+    }
     return {
       type: 'file',
       file: {

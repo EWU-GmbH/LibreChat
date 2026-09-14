@@ -97,6 +97,12 @@ export interface OpenAIInputFileBlock {
   file_data: string;
 }
 
+/** Plain-text content part: text documents inlined for OpenAI-compatible providers */
+export interface InlineTextBlock {
+  type: 'text';
+  text: string;
+}
+
 /** Bedrock Converse API document block (passthrough via @langchain/aws) */
 export interface BedrockDocumentBlock {
   type: 'document';
@@ -114,7 +120,8 @@ export type DocumentBlock =
   | GoogleDocumentBlock
   | OpenAIFileBlock
   | OpenAIInputFileBlock
-  | BedrockDocumentBlock;
+  | BedrockDocumentBlock
+  | InlineTextBlock;
 
 export interface DocumentResult {
   documents: DocumentBlock[];
