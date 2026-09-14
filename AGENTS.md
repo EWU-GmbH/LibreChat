@@ -10,11 +10,27 @@ over ad-hoc commands.
 The Cloud Agent environment is repository-managed via `.cursor/environment.json`
 and the scripts in `.cursor/setup/`:
 
-- `install` → `.cursor/setup/install.sh`: installs MongoDB, generates local
-  config, runs `npm ci`, then builds packages + client via `npm run frontend`.
-- `start` → `.cursor/setup/start.sh`: starts and health-checks MongoDB.
+- `install` → `.cursor/setup/install.sh`: installs Docker + `fuse-overlayfs`,
+  pulls the backing-service images, then runs `build-app.sh` (generate config,
+  `npm ci`, build packages + client).
+- `start` → `.cursor/setup/start.sh`: starts `dockerd` and the four backing
+  containers (MongoDB, Meilisearch, pgvector, RAG API), waits for readiness,
+  and rebuilds the app artifacts if a boot-time checkout discarded them.
 - `terminals`: runs `npm run backend:dev`, which serves the built client at
   `http://localhost:3080`.
+- `.cursor/setup/build-app.sh`: config generation + `npm ci` + `npm run
+  frontend`. Shared by `install.sh` and the self-healing path in `start.sh`.
+- `.cursor/setup/stack.env` / `docker-lib.sh`: non-secret stack config (images,
+  Meili dev key, Postgres creds, embeddings model) and Docker helpers.
+
+The full stack mirrors production (`docker-compose.yml` / `rag.yml`) so the app
+can be developed end-to-end. Backing services run as Docker containers with
+`--network host` because the nested Cloud Agent VM has no bridge/iptables;
+everything is reachable on `localhost`.
+
+Note: a prebuilt-environment boot may discard untracked files (`node_modules`,
+`client/dist`, generated `.env` / `librechat.yaml`). `start.sh` detects this and
+rebuilds via `build-app.sh`, so the app is runnable on every boot.
 
 This is a multi-repo workspace: the repositories are checked out under
 `/agent/repos/` and the working directory for environment commands is the
@@ -22,15 +38,23 @@ workspace root, not the repo. Always `cd /agent/repos/LibreChat` before running
 the setup scripts or npm scripts (the committed environment commands already do
 this).
 
-## Datastore
+## Backing services (Docker, host networking)
 
-- MongoDB is pinned to the 8.0 series and must be running for the backend.
-  It is installed only when missing and started (dbpath `/data/db`, port
-  `27017`, `--noauth`-style local dev) by `.cursor/setup/start.sh`. Re-run that
-  script any time to (idempotently) ensure Mongo is up.
-- Meilisearch and the RAG API are not part of this environment; message search
-  is disabled (`SEARCH=false` in the generated `.env`). File/RAG features that
-  require the RAG API are not available here.
+Run `bash .cursor/setup/start.sh` any time to (idempotently) ensure the stack is
+up. Containers and ports:
+
+- `mongodb` (`mongo:7`) — app data, `localhost:27017`.
+- `meilisearch` (`getmeili/meilisearch:v1.12.3`) — message search,
+  `localhost:7700`. `SEARCH=true` in the generated `.env`.
+- `vectordb` (`ankane/pgvector`) — vector store, `localhost:5432`.
+- `rag_api` (`ghcr.io/danny-avila/librechat-rag-api-dev`) — file
+  ingestion/retrieval, `localhost:8000`.
+
+RAG embeddings use a local HuggingFace model (`all-MiniLM-L6-v2`) so no
+embeddings API key is needed. Mistral's embeddings API rejects the OpenAI
+client's tokenized (integer-array) input, so do not point the RAG API at Mistral
+via the OpenAI-compatible path. Production may instead configure OpenAI/Azure
+embeddings via the RAG API env vars.
 
 ## Configuration & secrets
 
