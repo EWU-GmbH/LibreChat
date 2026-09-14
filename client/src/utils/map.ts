@@ -18,7 +18,7 @@ export function mapAttachments(attachments: Array<t.TAttachment | null | undefin
       attachmentMap[key] = [];
     }
 
-    attachmentMap[key].push(attachment);
+    attachmentMap[key]?.push(attachment);
   }
 
   return attachmentMap;
@@ -51,7 +51,7 @@ export function mapAgents(agents: t.Agent[]) {
   const agentsMap = {} as Record<string, t.Agent>;
 
   for (const agent of agents) {
-    agentsMap[agent.id] = { ...agent };
+    agentsMap[agent.id] = agent;
   }
 
   return agentsMap;

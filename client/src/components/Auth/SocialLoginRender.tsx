@@ -6,8 +6,7 @@ import {
   DiscordIcon,
   AppleIcon,
   SamlIcon,
-  Bitrix24Icon,
-} from '~/components';
+} from '@librechat/client';
 
 import SocialButton from './SocialButton';
 
@@ -36,17 +35,6 @@ function SocialLoginRender({
         Icon={DiscordIcon}
         label={localize('com_auth_discord_login')}
         id="discord"
-      />
-    ),
-    bitrix24: startupConfig.bitrix24LoginEnabled && (
-      <SocialButton
-        key="bitrix24"
-        enabled={startupConfig.bitrix24LoginEnabled}
-        serverDomain={startupConfig.serverDomain}
-        oauthPath="bitrix24"
-        Icon={Bitrix24Icon}
-        label='Bitrix24'
-        id="bitrix24"
       />
     ),
     facebook: startupConfig.facebookLoginEnabled && (

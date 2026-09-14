@@ -1,22 +1,75 @@
-const { Keyv } = require('keyv');
 const passport = require('passport');
 const session = require('express-session');
-const MemoryStore = require('memorystore')(session);
-const RedisStore = require('connect-redis').default;
+const { CacheKeys } = require('librechat-data-provider');
+const { math, isEnabled, shouldUseSecureCookie } = require('@librechat/api');
+const { logger, DEFAULT_SESSION_EXPIRY } = require('@librechat/data-schemas');
 const {
+  openIdJwtLogin,
+  facebookLogin,
+  facebookAdminLogin,
+  discordLogin,
+  discordAdminLogin,
   setupOpenId,
   googleLogin,
+  googleAdminLogin,
   githubLogin,
-  discordLogin,
-  bitrix24Login,
-  facebookLogin,
+  githubAdminLogin,
   appleLogin,
+  appleAdminLogin,
   setupSaml,
-  openIdJwtLogin,
 } = require('~/strategies');
-const { isEnabled } = require('~/server/utils');
-const keyvRedis = require('~/cache/keyvRedis');
-const { logger } = require('~/config');
+const { getLogStores } = require('~/cache');
+
+const DEFAULT_OPENID_REUSE_MAX_SESSION_AGE_MS = 15 * 60 * 1000;
+
+const getSessionExpiry = () => math(process.env.SESSION_EXPIRY, DEFAULT_SESSION_EXPIRY);
+
+const getOpenIdSessionExpiry = () => {
+  const sessionExpiry = getSessionExpiry();
+  if (!isEnabled(process.env.OPENID_REUSE_TOKENS)) {
+    return sessionExpiry;
+  }
+
+  const reuseMaxSessionAge = math(
+    process.env.OPENID_REUSE_MAX_SESSION_AGE_MS,
+    DEFAULT_OPENID_REUSE_MAX_SESSION_AGE_MS,
+  );
+  return Math.max(sessionExpiry, reuseMaxSessionAge);
+};
+
+/**
+ * Configures OpenID Connect for the application.
+ * @param {Express.Application} app - The Express application instance.
+ * @returns {Promise<void>}
+ */
+async function configureOpenId(app) {
+  logger.info('Configuring OpenID Connect...');
+  const sessionExpiry = getOpenIdSessionExpiry();
+  const sessionOptions = {
+    secret: process.env.OPENID_SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    store: getLogStores(CacheKeys.OPENID_SESSION),
+    cookie: {
+      maxAge: sessionExpiry,
+      secure: shouldUseSecureCookie(),
+    },
+  };
+  app.use(session(sessionOptions));
+  app.use(passport.session());
+
+  const config = await setupOpenId();
+  if (!config) {
+    logger.error('OpenID Connect configuration failed - strategy not registered.');
+    return;
+  }
+
+  if (isEnabled(process.env.OPENID_REUSE_TOKENS)) {
+    logger.info('OpenID token reuse is enabled.');
+    passport.use('openidJwt', openIdJwtLogin(config));
+  }
+  logger.info('OpenID Connect configured successfully.');
+}
 
 /**
  *
@@ -27,53 +80,32 @@ const configureSocialLogins = async (app) => {
 
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     passport.use(googleLogin());
+    passport.use('googleAdmin', googleAdminLogin());
   }
   if (process.env.FACEBOOK_CLIENT_ID && process.env.FACEBOOK_CLIENT_SECRET) {
     passport.use(facebookLogin());
+    passport.use('facebookAdmin', facebookAdminLogin());
   }
   if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
     passport.use(githubLogin());
+    passport.use('githubAdmin', githubAdminLogin());
   }
   if (process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET) {
     passport.use(discordLogin());
+    passport.use('discordAdmin', discordAdminLogin());
   }
   if (process.env.APPLE_CLIENT_ID && process.env.APPLE_PRIVATE_KEY_PATH) {
     passport.use(appleLogin());
-  }
-  if (process.env.BITRIX24_CLIENT_ID && process.env.BITRIX24_CLIENT_SECRET) {
-    passport.use('bitrix24',bitrix24Login());
+    passport.use('appleAdmin', appleAdminLogin());
   }
   if (
     process.env.OPENID_CLIENT_ID &&
-    process.env.OPENID_CLIENT_SECRET &&
+    (isEnabled(process.env.OPENID_USE_PKCE) || process.env.OPENID_CLIENT_SECRET?.trim()) &&
     process.env.OPENID_ISSUER &&
     process.env.OPENID_SCOPE &&
     process.env.OPENID_SESSION_SECRET
   ) {
-    logger.info('Configuring OpenID Connect...');
-    const sessionOptions = {
-      secret: process.env.OPENID_SESSION_SECRET,
-      resave: false,
-      saveUninitialized: false,
-    };
-    if (isEnabled(process.env.USE_REDIS)) {
-      logger.debug('Using Redis for session storage in OpenID...');
-      const keyv = new Keyv({ store: keyvRedis });
-      const client = keyv.opts.store.client;
-      sessionOptions.store = new RedisStore({ client, prefix: 'openid_session' });
-    } else {
-      sessionOptions.store = new MemoryStore({
-        checkPeriod: 86400000, // prune expired entries every 24h
-      });
-    }
-    app.use(session(sessionOptions));
-    app.use(passport.session());
-    const config = await setupOpenId();
-    if (isEnabled(process.env.OPENID_REUSE_TOKENS)) {
-      logger.info('OpenID token reuse is enabled.');
-      passport.use('openidJwt', openIdJwtLogin(config));
-    }
-    logger.info('OpenID Connect configured.');
+    await configureOpenId(app);
   }
   if (
     process.env.SAML_ENTRY_POINT &&
@@ -82,21 +114,17 @@ const configureSocialLogins = async (app) => {
     process.env.SAML_SESSION_SECRET
   ) {
     logger.info('Configuring SAML Connect...');
+    const sessionExpiry = getSessionExpiry();
     const sessionOptions = {
       secret: process.env.SAML_SESSION_SECRET,
       resave: false,
       saveUninitialized: false,
+      store: getLogStores(CacheKeys.SAML_SESSION),
+      cookie: {
+        maxAge: sessionExpiry,
+        secure: shouldUseSecureCookie(),
+      },
     };
-    if (isEnabled(process.env.USE_REDIS)) {
-      logger.debug('Using Redis for session storage in SAML...');
-      const keyv = new Keyv({ store: keyvRedis });
-      const client = keyv.opts.store.client;
-      sessionOptions.store = new RedisStore({ client, prefix: 'saml_session' });
-    } else {
-      sessionOptions.store = new MemoryStore({
-        checkPeriod: 86400000, // prune expired entries every 24h
-      });
-    }
     app.use(session(sessionOptions));
     app.use(passport.session());
     setupSaml();
