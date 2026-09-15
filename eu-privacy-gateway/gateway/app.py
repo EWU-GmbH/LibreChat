@@ -124,11 +124,23 @@ def _log_mask_summary(original: List[Dict[str, Any]], masked: List[Dict[str, Any
         log.info("  %s -> %s", placeholder, value)
 
 
+def _map_model_name(model: str, provider: str) -> str:
+    """Map friendly model names to provider-specific IDs."""
+    if provider == "openrouter":
+        mapping = {
+            "mistral-small-latest": "mistralai/mistral-small-2603",
+            "mistral-large-latest": "openrouter/auto",
+        }
+        return mapping.get(model, model)
+    return model
+
+
 def _build_upstream_payload(body: Dict[str, Any], masked_messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     payload = dict(body)
     payload["messages"] = masked_messages
-    if not payload.get("model"):
-        payload["model"] = UPSTREAM["default_model"]
+    model = payload.get("model", UPSTREAM["default_model"])
+    # Map friendly model names to provider-specific IDs
+    payload["model"] = _map_model_name(model, UPSTREAM["provider"])
     for key, value in UPSTREAM["extra_body"].items():
         payload.setdefault(key, value)
     return payload
