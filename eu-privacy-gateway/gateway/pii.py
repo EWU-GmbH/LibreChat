@@ -9,11 +9,21 @@ model's response can be de-anonymized locally.
 
 from __future__ import annotations
 
+import logging
+import os
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer, RecognizerResult
+from presidio_analyzer import (
+    AnalyzerEngine,
+    EntityRecognizer,
+    Pattern,
+    PatternRecognizer,
+    RecognizerResult,
+)
 from presidio_analyzer.nlp_engine import NlpEngineProvider
+
+log = logging.getLogger("eu-privacy-gateway.pii")
 
 # Presidio entity type -> short, model-friendly placeholder label.
 ENTITY_LABELS: Dict[str, str] = {
@@ -35,6 +45,24 @@ ENTITY_LABELS: Dict[str, str] = {
 
 DEFAULT_SCORE_THRESHOLD = 0.35
 
+# --- GLiNER (high-recall NER) configuration -------------------------------
+# EWU has confirmed there is NO health data, and an occasional missed CITY is
+# acceptable, so the gateway is tuned for high recall on PERSON NAMES and STREET
+# ADDRESSES. GLiNER (a zero-shot span model) complements spaCy, which alone
+# misses names such as "Dr. Müller".
+GLINER_ENABLED = os.environ.get("GATEWAY_USE_GLINER", "1").lower() not in {"0", "false", "no"}
+GLINER_MODEL = os.environ.get("GLINER_MODEL", "urchade/gliner_multi_pii-v1")
+# Recall-oriented detection threshold for GLiNER itself.
+GLINER_THRESHOLD = float(os.environ.get("GLINER_THRESHOLD", "0.30"))
+# GLiNER prompt labels -> Presidio entity types. Focused on names + addresses;
+# ``organization`` is intentionally omitted (it mislabels pronouns like "Wir"
+# and adds noise without helping the name/address recall goal).
+GLINER_LABEL_MAP: Dict[str, str] = {
+    "person": "PERSON",
+    "name": "PERSON",
+    "address": "DE_ADDRESS",
+}
+
 
 def _build_analyzer() -> AnalyzerEngine:
     provider = NlpEngineProvider(
@@ -49,7 +77,108 @@ def _build_analyzer() -> AnalyzerEngine:
     for recognizer in _german_recognizers():
         analyzer.registry.add_recognizer(recognizer)
 
+    if GLINER_ENABLED:
+        gliner = _try_build_gliner_recognizer()
+        if gliner is not None:
+            analyzer.registry.add_recognizer(gliner)
+            log.info("GLiNER recognizer registered (model=%s, threshold=%s)", GLINER_MODEL, GLINER_THRESHOLD)
+
     return analyzer
+
+
+def _try_build_gliner_recognizer() -> Optional["GLiNERRecognizer"]:
+    """Build the GLiNER recognizer, degrading gracefully if it is unavailable.
+
+    If GLiNER/torch cannot be imported or the model cannot be loaded, the
+    gateway falls back to spaCy + regex so masking still works (with lower
+    name recall).
+    """
+    try:
+        recognizer = GLiNERRecognizer(
+            model_name=GLINER_MODEL,
+            label_map=GLINER_LABEL_MAP,
+            threshold=GLINER_THRESHOLD,
+        )
+        recognizer.load()
+        return recognizer
+    except Exception as exc:  # noqa: BLE001 - PoC fallback: never break masking.
+        log.warning(
+            "GLiNER unavailable (%s); falling back to spaCy + regex only. "
+            "Name recall will be lower.",
+            exc,
+        )
+        return None
+
+
+class GLiNERRecognizer(EntityRecognizer):
+    """High-recall NER via the GLiNER span model, wrapped as a Presidio recognizer.
+
+    GLiNER (``urchade/gliner_multi_pii-v1``) is a zero-shot model prompted with
+    plain-language labels (``person``, ``name``, ``address`` ...). It reliably
+    catches German names that spaCy misses (e.g. "Dr. Müller"). Detected spans
+    are returned with a recall-biased score floor so they survive the analyzer
+    threshold and get masked.
+    """
+
+    _SCORE_FLOOR = 0.6
+
+    def __init__(
+        self,
+        model_name: str,
+        label_map: Dict[str, str],
+        supported_language: str = "de",
+        threshold: float = 0.30,
+    ) -> None:
+        self._model_name = model_name
+        self._label_map = label_map
+        self._threshold = threshold
+        self._prompt_labels = sorted(set(label_map.keys()))
+        self._model = None
+        super().__init__(
+            supported_entities=sorted(set(label_map.values())),
+            supported_language=supported_language,
+            name="GLiNERRecognizer",
+        )
+
+    def load(self) -> None:
+        if self._model is not None:
+            return
+        from gliner import GLiNER  # imported lazily so the dep stays optional
+
+        self._model = GLiNER.from_pretrained(self._model_name)
+
+    def analyze(self, text, entities, nlp_artifacts=None) -> List[RecognizerResult]:
+        if not text or not text.strip():
+            return []
+        if self._model is None:
+            self.load()
+
+        try:
+            predictions = self._model.predict_entities(
+                text, self._prompt_labels, threshold=self._threshold
+            )
+        except Exception as exc:  # noqa: BLE001 - degrade to spaCy + regex.
+            log.warning("GLiNER inference failed (%s); skipping GLiNER for this text.", exc)
+            return []
+
+        results: List[RecognizerResult] = []
+        for pred in predictions:
+            entity_type = self._label_map.get(pred["label"])
+            if entity_type is None:
+                continue
+            if entities and entity_type not in entities:
+                continue
+            # Recall bias: floor the score so borderline names still get masked.
+            score = max(float(pred["score"]), self._SCORE_FLOOR)
+            results.append(
+                RecognizerResult(
+                    entity_type=entity_type,
+                    start=int(pred["start"]),
+                    end=int(pred["end"]),
+                    score=score,
+                )
+            )
+        return results
 
 
 def _german_recognizers() -> List[PatternRecognizer]:
@@ -66,16 +195,32 @@ def _german_recognizers() -> List[PatternRecognizer]:
                 )
             ],
         ),
-        # Street address: "Musterstraße 12", "Bahnhofstr. 5a", "Lindenweg 7".
+        # Street address (recall-biased): "Musterstraße 12", "Bahnhofstr. 5a",
+        # "Lindenweg 3a", "Hauptstr. 45", "Berliner Allee 12-14", "Rheinufer 7".
+        # A missed city is acceptable; a missed street is not, so this matches
+        # both compound street names (suffix glued on) and separated ones
+        # ("<Word> Allee/Platz/..."), each followed by a house number that may
+        # carry a letter ("12a") or be a range ("12-14").
         PatternRecognizer(
             supported_entity="DE_ADDRESS",
             supported_language="de",
             patterns=[
+                # Compound suffix, e.g. Musterstraße / Bahnhofstr. / Lindenweg.
                 Pattern(
-                    "de_street",
-                    r"\b[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ.\-]*(?:stra(?:ß|ss)e|str\.|weg|allee|platz|gasse|ring|damm)\s+\d{1,4}\s*[a-zA-Z]?\b",
+                    "de_street_compound",
+                    r"\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]*"
+                    r"(?:stra(?:ß|ss)e|str\.?|weg|platz|pl\.|allee|ring|gasse|damm|ufer|höfe?|hof|steig|wall|markt)"
+                    r"\s+\d{1,4}(?:\s?[-/]\s?\d{1,4})?\s?[a-zA-Z]?\b",
                     0.85,
-                )
+                ),
+                # Separated suffix as its own word, e.g. "Berliner Allee 12-14".
+                Pattern(
+                    "de_street_separated",
+                    r"\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+\s+"
+                    r"(?:Stra(?:ß|ss)e|Str\.?|Weg|Platz|Pl\.|Allee|Ring|Gasse|Damm|Ufer|Steig|Markt)"
+                    r"\s+\d{1,4}(?:\s?[-/]\s?\d{1,4})?\s?[a-zA-Z]?\b",
+                    0.85,
+                ),
             ],
         ),
         # 5-digit postal code, only near address context to limit false positives.

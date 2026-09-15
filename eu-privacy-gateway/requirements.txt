@@ -6,3 +6,14 @@ uvicorn[standard]==0.37.0
 httpx==0.28.1
 # German spaCy model (install separately):
 #   python -m spacy download de_core_news_lg
+
+# High-recall NER for PERSON names + addresses (GLiNER, zero-shot span model).
+# torch is CPU-only here; the model weights (urchade/gliner_multi_pii-v1) are
+# fetched from the HF hub at first run (never committed to the repo).
+gliner==0.2.29
+torch==2.14.0
+# gliner_multi_pii-v1 uses a DeBERTa-v3 (SentencePiece) tokenizer; transformers
+# 5.x drops the slow->fast conversion it needs, so pin the 4.x line + protobuf.
+transformers==4.56.2
+protobuf>=4
+# Disable GLiNER (fall back to spaCy + regex) with GATEWAY_USE_GLINER=0.
