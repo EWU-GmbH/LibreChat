@@ -25,13 +25,28 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from .pii import Pseudonymizer, StreamRestorer, get_analyzer
 
+# Verbose audit logging prints RAW PII and the placeholder->value mapping. It is
+# a DEV-ONLY affordance for demonstrating masking and MUST stay off in
+# production. Default off (production-safe); opt in with GATEWAY_VERBOSE_AUDIT=1.
+VERBOSE_AUDIT = os.environ.get("GATEWAY_VERBOSE_AUDIT", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+# Only stdout by default (captured by the platform's log pipeline). A file sink
+# is attached ONLY when GATEWAY_AUDIT_LOG is explicitly set, so production does
+# not silently persist anything to disk.
+_log_handlers: List[logging.Handler] = [logging.StreamHandler()]
+_audit_log_path = os.environ.get("GATEWAY_AUDIT_LOG")
+if _audit_log_path:
+    _log_handlers.append(logging.FileHandler(_audit_log_path))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(os.environ.get("GATEWAY_AUDIT_LOG", "/tmp/gateway-audit.log")),
-    ],
+    handlers=_log_handlers,
 )
 log = logging.getLogger("eu-privacy-gateway")
 
@@ -65,11 +80,18 @@ def _startup() -> None:
     log.info("Loading Presidio analyzer (spaCy de_core_news_lg) ...")
     get_analyzer()
     log.info(
-        "Gateway ready. Upstream provider=%s base_url=%s default_model=%s",
+        "Gateway ready. Upstream provider=%s base_url=%s default_model=%s verbose_audit=%s",
         UPSTREAM["provider"],
         UPSTREAM["base_url"],
         UPSTREAM["default_model"],
+        VERBOSE_AUDIT,
     )
+    if VERBOSE_AUDIT:
+        log.warning(
+            "GATEWAY_VERBOSE_AUDIT is ON: raw PII and the placeholder mapping "
+            "will be logged. This is a DEV-ONLY setting; do NOT enable it in "
+            "production."
+        )
     if UPSTREAM["provider"] == "mistral":
         log.warning(
             "No OPENROUTER_KEY found -> using Mistral fallback. Add OPENROUTER_KEY "
@@ -85,7 +107,9 @@ def health() -> Dict[str, Any]:
 @app.get("/v1/models")
 def models() -> Dict[str, Any]:
     now = int(time.time())
-    ids = [UPSTREAM["default_model"], "mistral-small-latest", "mistral-large-latest"]
+    # Model routing is pass-through: the concrete selectable model IDs are
+    # curated in LibreChat's config. Advertise only the default (auto) here.
+    ids = [UPSTREAM["default_model"]]
     return {"object": "list", "data": [{"id": m, "object": "model", "created": now, "owned_by": "eu-privacy-gateway"} for m in ids]}
 
 
@@ -111,6 +135,24 @@ def _mask_messages(messages: List[Dict[str, Any]], pseudo: Pseudonymizer) -> Lis
 
 
 def _log_mask_summary(original: List[Dict[str, Any]], masked: List[Dict[str, Any]], pseudo: Pseudonymizer) -> None:
+    """Audit the masking step.
+
+    In production (VERBOSE_AUDIT off) only aggregate, non-sensitive information
+    is logged: how many entities were masked and their entity types/counts.
+    Raw PII and the placeholder->value mapping are NEVER logged unless the
+    dev-only GATEWAY_VERBOSE_AUDIT flag is set.
+    """
+    counts = pseudo.entity_type_counts()
+    total = sum(counts.values())
+    log.info(
+        "Masked %d PII entit%s across %d message(s); by type: %s",
+        total,
+        "y" if total == 1 else "ies",
+        len(original),
+        counts or "{}",
+    )
+    if not VERBOSE_AUDIT:
+        return
     log.info("=== INBOUND (from LibreChat, RAW) ===")
     for m in original:
         if isinstance(m.get("content"), str):
@@ -124,23 +166,31 @@ def _log_mask_summary(original: List[Dict[str, Any]], masked: List[Dict[str, Any
         log.info("  %s -> %s", placeholder, value)
 
 
-def _map_model_name(model: str, provider: str) -> str:
-    """Map friendly model names to provider-specific IDs."""
-    if provider == "openrouter":
-        mapping = {
-            "mistral-small-latest": "mistralai/mistral-small-2603",
-            "mistral-large-latest": "openrouter/auto",
-        }
-        return mapping.get(model, model)
-    return model
+# Model names that mean "let the gateway/OpenRouter pick": these are resolved to
+# the configured default (``openrouter/auto``). Any other value is a concrete
+# provider model ID and is forwarded to the upstream unchanged (pass-through).
+_AUTO_MODEL_ALIASES = {"", "auto", "openrouter/auto", "default"}
+
+
+def _resolve_model(requested: Optional[str]) -> str:
+    """Pass-through model routing.
+
+    - No model, or a friendly/auto alias -> the configured default
+      (``openrouter/auto``), letting OpenRouter auto-select a provider.
+    - A concrete model ID (e.g. ``anthropic/claude-3.7-sonnet``) -> forwarded
+      unchanged so users can pick a specific model.
+    """
+    if requested is None:
+        return UPSTREAM["default_model"]
+    if requested.strip().lower() in _AUTO_MODEL_ALIASES:
+        return UPSTREAM["default_model"]
+    return requested
 
 
 def _build_upstream_payload(body: Dict[str, Any], masked_messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     payload = dict(body)
     payload["messages"] = masked_messages
-    model = payload.get("model", UPSTREAM["default_model"])
-    # Map friendly model names to provider-specific IDs
-    payload["model"] = _map_model_name(model, UPSTREAM["provider"])
+    payload["model"] = _resolve_model(payload.get("model"))
     for key, value in UPSTREAM["extra_body"].items():
         payload.setdefault(key, value)
     return payload
@@ -188,9 +238,10 @@ async def _complete_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudony
         message = choice.get("message", {})
         if isinstance(message.get("content"), str):
             message["content"] = pseudo.restore(message["content"])
-    log.info("=== RESPONSE (restored, non-stream) ===")
-    for choice in data.get("choices", []):
-        log.info("  %s", choice.get("message", {}).get("content", ""))
+    if VERBOSE_AUDIT:
+        log.info("=== RESPONSE (restored, non-stream) ===")
+        for choice in data.get("choices", []):
+            log.info("  %s", choice.get("message", {}).get("content", ""))
     return JSONResponse(content=data)
 
 
@@ -225,8 +276,9 @@ async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymi
                 if emitted:
                     restored_full.append(emitted)
                 yield f"data: {json.dumps(chunk)}\n\n".encode()
-    log.info("=== RESPONSE (restored, streamed) ===")
-    log.info("  %s", "".join(restored_full))
+    if VERBOSE_AUDIT:
+        log.info("=== RESPONSE (restored, streamed) ===")
+        log.info("  %s", "".join(restored_full))
 
 
 def _restore_stream_chunk(chunk: Dict[str, Any], restorer: StreamRestorer) -> str:

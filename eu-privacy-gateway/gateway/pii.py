@@ -342,6 +342,19 @@ class Pseudonymizer:
     def mapping_summary(self) -> Dict[str, str]:
         return dict(self.placeholder_to_value)
 
+    def entity_type_counts(self) -> Dict[str, int]:
+        """Non-sensitive audit summary: how many entities per label.
+
+        Derived from the placeholder labels only (e.g. ``[PERSON_1]`` -> label
+        ``PERSON``); contains no raw PII, so it is safe to log in production.
+        """
+        counts: Dict[str, int] = {}
+        for placeholder in self.placeholder_to_value:
+            match = re.match(r"\[([A-Z_]+)_\d+\]$", placeholder)
+            label = match.group(1) if match else placeholder
+            counts[label] = counts.get(label, 0) + 1
+        return counts
+
 
 class StreamRestorer:
     """Restores placeholders in a streamed token sequence.

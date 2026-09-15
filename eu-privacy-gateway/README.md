@@ -1,4 +1,4 @@
-# EU Privacy Gateway (PoC)
+# EU Privacy Gateway
 
 An OpenAI-compatible reverse proxy that sits between **LibreChat** and the model
 provider. It provides two things:
@@ -15,9 +15,34 @@ provider. It provides two things:
    + privacy routing) when an OpenRouter key is present, otherwise a **Mistral**
    fallback so the masking mechanism can still be demonstrated.
 
-This is a **proof of concept** for the dev environment. It is intentionally a
-thin custom proxy (rather than LiteLLM's Presidio guardrail) so we have full
-control of streaming/tool-call restore.
+It is intentionally a thin custom proxy (rather than LiteLLM's Presidio
+guardrail) so we have full control of streaming/tool-call restore.
+
+## Model routing (pass-through)
+
+Model selection is **pass-through**. If LibreChat sends no model, or a
+friendly/auto alias (`auto`, `openrouter/auto`, `default`), the gateway uses
+`openrouter/auto` and lets OpenRouter pick a provider. Any other value is a
+concrete OpenRouter model ID (e.g. `anthropic/claude-3.7-sonnet`) and is
+forwarded unchanged, so users can also pick a specific model. Privacy routing
+(`provider: { data_collection: "deny", zdr: true }`) is injected on every
+request.
+
+## Audit logging (production-safe)
+
+By default the gateway logs only **aggregate, non-sensitive** audit info: how
+many entities were masked and their entity types/counts — never raw PII or the
+placeholder→value mapping. Verbose masking/restore logging (raw PII + mapping)
+is a **dev-only** affordance behind `GATEWAY_VERBOSE_AUDIT=1`; it must stay off
+in production. A file log sink is attached only when `GATEWAY_AUDIT_LOG` is set;
+otherwise logs go to stdout only.
+
+## Container
+
+`Dockerfile` builds a CPU-only image that bakes in the spaCy `de_core_news_lg`
+model and (when enabled) the GLiNER weights, so first boot is fast. It runs
+`uvicorn gateway.app:app --host 0.0.0.0 --port $PORT`. GLiNER can be disabled
+with `GATEWAY_USE_GLINER=0` (falls back to spaCy + regex, lower name recall).
 
 ## Architecture
 
