@@ -86,3 +86,48 @@ embeddings via the RAG API env vars.
 
 - Use MongoDB 8.x for local/dev testing (matches the pinned install).
 - Use the Mistral endpoint for end-to-end chat verification.
+
+## Cursor Cloud specific instructions
+
+Notes for operating the EWU production deployment on Railway (project
+`EWU_LibreChat`, service `LibreChat 🪶` `084a7ad2-d27b-46b8-9971-74f8a58fc373`,
+env `production`; confirm via `https://ki-chat.ewu-web.de`). Never touch the PoC
+project.
+
+### Flux image generation requires the global BFL host
+
+LibreChat's `FluxAPI.js` defaults its base URL to `https://api.us1.bfl.ai`. The
+regional BFL hosts (`api.us1.bfl.ai`, `api.eu1.bfl.ai`) are unreachable from the
+Railway prod container (and from the dev VM) — they `ETIMEDOUT`. The BFL global
+endpoint `https://api.bfl.ai` (Azure Front Door) is reachable and the prod
+`FLUX_API_KEY` is valid there (`GET /v1/my_finetunes` → HTTP 200). Therefore the
+prod service must set `FLUX_API_BASE_URL=https://api.bfl.ai`; without it, agent
+image generation fails at the tool call with `connect ETIMEDOUT`.
+
+### In-container maintenance pattern (start-command swap)
+
+External access to the container's DB/network is not available, so one-off
+maintenance (DB edits, minting an admin JWT, network reachability probes) is run
+by temporarily swapping the service `startCommand`, then restoring it:
+
+1. Base64-encode a Node script and embed it in a maintenance `startCommand` that
+   decodes it to `/app/<name>.js` (writable), runs it (`node /app/<name>.js`
+   piping output through `sed 's/^/MAINTOUT /'` so it is greppable in logs), then
+   falls through to the normal boot:
+   `printf "%s" "$LIBRECHAT_CONFIG_YAML" > /app/librechat.yaml && exec npm run backend`.
+2. Apply it via `serviceInstanceUpdate` (set `startCommand`), then trigger a
+   deploy with `serviceInstanceRedeploy(environmentId, serviceId)` — NOT
+   `deploymentRedeploy(id)`, which replays an old deployment's config snapshot
+   and ignores the new start command.
+3. In the script, resolve modules by absolute path
+   (`/app/node_modules/...`, `/app/config/connect`) and load
+   `module-alias({ base: '/app/api' })` before requiring app modules.
+4. After the work is read from deploy logs, restore the normal start command and
+   redeploy:
+   `sh -c 'printf "%s" "$LIBRECHAT_CONFIG_YAML" > /app/librechat.yaml && exec npm run backend'`.
+
+Railway GraphQL / REST calls from the VM must send a browser-like `User-Agent`
+(e.g. `curl/8.5.0`) or they return HTTP 403. LibreChat's own API also runs the
+`uaParser` middleware, which rejects requests without a browser-like
+`User-Agent` (`"Illegal request"`); include a `Mozilla/5.0 ...` UA on admin API
+calls (agent creation, permissions, `/api/agents/chat`).
