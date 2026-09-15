@@ -46,6 +46,8 @@ RUN python -c "from gliner import GLiNER; GLiNER.from_pretrained('${GLINER_MODEL
 COPY gateway ./gateway
 
 # Railway injects PORT at runtime; default to 8100 for local runs. Shell-form
-# CMD so ${PORT} is expanded at container start.
+# CMD so ${PORT} is expanded at container start. Bind :: (IPv6 dual-stack) so
+# the service is reachable over Railway's IPv6-only private network via its
+# *.railway.internal hostname (a v4-mapped bind still accepts IPv4 healthchecks).
 EXPOSE 8100
-CMD uvicorn gateway.app:app --host 0.0.0.0 --port ${PORT:-8100}
+CMD uvicorn gateway.app:app --host :: --port ${PORT:-8100}
