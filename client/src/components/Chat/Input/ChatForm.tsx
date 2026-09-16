@@ -113,6 +113,14 @@ const ChatForm = memo(function ChatForm({
     [conversation?.spec, startupConfig],
   );
   const hideBadgeRow = modelSpec?.hideBadgeRow === true;
+  /** Agents and assistants persist their own tool config, so the ephemeral toggles stay hidden. */
+  const showEphemeralBadges =
+    !!endpoint && !hideBadgeRow && !isAgentsEndpoint(endpoint) && !isAssistantsEndpoint(endpoint);
+  /**
+   * MCP selection is request-scoped rather than persisted on the agent, so agent
+   * conversations need the picker even though their other tool badges are hidden.
+   */
+  const showMCPSelect = !!endpoint && !hideBadgeRow && !isAssistantsEndpoint(endpoint);
   const conversationId = useMemo(
     () => conversation?.conversationId ?? Constants.NEW_CONVO,
     [conversation?.conversationId],
@@ -376,12 +384,8 @@ const ChatForm = memo(function ChatForm({
                 />
               </div>
               <BadgeRow
-                showEphemeralBadges={
-                  !!endpoint &&
-                  !hideBadgeRow &&
-                  !isAgentsEndpoint(endpoint) &&
-                  !isAssistantsEndpoint(endpoint)
-                }
+                showEphemeralBadges={showEphemeralBadges}
+                showMCPSelect={showMCPSelect}
                 isSubmitting={isSubmitting}
                 conversationId={conversationId}
                 specName={conversation?.spec}

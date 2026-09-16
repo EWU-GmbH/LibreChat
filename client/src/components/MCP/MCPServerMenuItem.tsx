@@ -1,15 +1,14 @@
 import * as Ariakit from '@ariakit/react';
-import { Check } from 'lucide-react';
 import { MCPIcon } from '@librechat/client';
 import type { MCPServerDefinition } from '~/hooks/MCP/useMCPServerManager';
 import type { MCPServerStatusIconProps } from './MCPServerStatusIcon';
-import MCPServerStatusIcon from './MCPServerStatusIcon';
 import {
   getStatusColor,
   getStatusTextKey,
   shouldShowActionButton,
   type ConnectionStatusMap,
 } from './mcpServerUtils';
+import MCPServerStatusIcon from './MCPServerStatusIcon';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 
@@ -95,17 +94,18 @@ export default function MCPServerMenuItem({
         </div>
       )}
 
-      {/* Selection Indicator - purely visual, state conveyed by aria-checked on MenuItem */}
+      {/* Selection Indicator - round to signal that only one server can be active per
+          conversation; state itself is conveyed by aria-checked on the MenuItem */}
       <span
         aria-hidden="true"
         className={cn(
-          'flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-sm border',
+          'flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border',
           isSelected
             ? 'border-primary bg-primary text-primary-foreground'
             : 'border-border-xheavy bg-transparent',
         )}
       >
-        {isSelected && <Check className="h-4 w-4" />}
+        {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
       </span>
     </Ariakit.MenuItemCheckbox>
   );

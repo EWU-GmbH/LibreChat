@@ -11,10 +11,10 @@ import React, {
 import { Badge } from '@librechat/client';
 import { useRecoilValue, useRecoilCallback } from 'recoil';
 import type { LucideIcon } from 'lucide-react';
+import type { BadgeItem } from '~/common';
 import CodeInterpreter from './CodeInterpreter';
 import { BadgeRowProvider } from '~/Providers';
 import ToolsDropdown from './ToolsDropdown';
-import type { BadgeItem } from '~/common';
 import { useChatBadges } from '~/hooks';
 import ToolDialogs from './ToolDialogs';
 import FileSearch from './FileSearch';
@@ -26,6 +26,7 @@ import store from '~/store';
 
 interface BadgeRowProps {
   showEphemeralBadges?: boolean;
+  showMCPSelect?: boolean;
   onChange: (badges: Pick<BadgeItem, 'id'>[]) => void;
   onToggle?: (badgeId: string, currentActive: boolean) => void;
   conversationId?: string | null;
@@ -143,6 +144,7 @@ const dragReducer = (state: DragState, action: DragAction): DragState => {
 
 function BadgeRow({
   showEphemeralBadges,
+  showMCPSelect,
   conversationId,
   specName,
   isSubmitting,
@@ -376,9 +378,9 @@ function BadgeRow({
             <FileSearch />
             <Skills />
             <Artifacts />
-            <MCPSelect />
           </>
         )}
+        {showMCPSelect === true && <MCPSelect alwaysVisible={showEphemeralBadges !== true} />}
         {ghostBadge && (
           <div
             className="ghost-badge h-full"
