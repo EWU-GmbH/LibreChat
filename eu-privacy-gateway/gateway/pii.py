@@ -60,6 +60,23 @@ SUPPORTED_ENTITIES: List[str] = list(ENTITY_LABELS.keys())
 DEFAULT_SCORE_THRESHOLD = 0.35
 DEFAULT_ANALYSIS_CACHE_SIZE = 2048
 
+# Entities detectable via PatternRecognizer alone (no spaCy/GLiNER). Used for
+# tool-role payloads so agent loops do not re-run full NER on MCP JSON.
+STRUCTURED_ONLY_ENTITIES: Tuple[str, ...] = (
+    "IBAN_CODE",
+    "EMAIL_ADDRESS",
+    "PHONE_NUMBER",
+    "CREDIT_CARD",
+    "DE_ADDRESS",
+    "DE_POSTAL_CODE",
+    "DE_CUSTOMER_ID",
+    "DE_CASE_ID",
+    "DE_TAX_ID",
+    "DE_HEALTH_INSURANCE_ID",
+    "DE_SOCIAL_INSURANCE_ID",
+    "DE_LICENSE_PLATE",
+)
+
 
 def _analysis_cache_size() -> int:
     raw = os.environ.get("GATEWAY_PII_CACHE_SIZE", str(DEFAULT_ANALYSIS_CACHE_SIZE))
@@ -614,6 +631,31 @@ class Pseudonymizer:
             _prime_chunk_cache(self._analyzer, text, self._threshold, results)
             return self._apply_results(text, results)
         return "".join(self._mask_chunk(chunk) for chunk in _analysis_chunks(text))
+
+    def mask_structured(self, text: str) -> str:
+        """Regex/pattern-only masking for tool payloads (skips spaCy + GLiNER)."""
+        if not text or not text.strip():
+            return text
+        started_at = time.perf_counter()
+        results: List[RecognizerResult] = []
+        allowed = set(STRUCTURED_ONLY_ENTITIES)
+        for recognizer in self._analyzer.registry.recognizers:
+            if not isinstance(recognizer, PatternRecognizer):
+                continue
+            supported = set(getattr(recognizer, "supported_entities", None) or [])
+            entities = sorted(supported & allowed)
+            if not entities:
+                continue
+            try:
+                found = recognizer.analyze(text, entities=entities)
+            except Exception as exc:  # noqa: BLE001 - never break the gateway path
+                log.debug("Structured recognizer %s failed: %s", getattr(recognizer, "name", "?"), exc)
+                continue
+            for res in found:
+                if res.score >= self._threshold:
+                    results.append(res)
+        self._analysis_duration_ms += (time.perf_counter() - started_at) * 1000
+        return self._apply_results(text, results)
 
     def _mask_chunk(self, text: str) -> str:
         if not text.strip():

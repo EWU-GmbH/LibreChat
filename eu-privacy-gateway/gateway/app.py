@@ -113,23 +113,37 @@ def models() -> Dict[str, Any]:
     return {"object": "list", "data": [{"id": m, "object": "model", "created": now, "owned_by": "eu-privacy-gateway"} for m in ids]}
 
 
+def _mask_content(content: Any, pseudo: Pseudonymizer, *, structured_only: bool) -> Any:
+    """Mask one message body; tool roles use regex-only to skip GLiNER/spaCy."""
+    mask = pseudo.mask_structured if structured_only else pseudo.mask
+    if isinstance(content, str):
+        return mask(content)
+    if isinstance(content, list):
+        new_parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+                new_part = dict(part)
+                new_part["text"] = mask(part["text"])
+                new_parts.append(new_part)
+            else:
+                new_parts.append(part)
+        return new_parts
+    return content
+
+
 def _mask_messages(messages: List[Dict[str, Any]], pseudo: Pseudonymizer) -> List[Dict[str, Any]]:
     masked: List[Dict[str, Any]] = []
     for msg in messages:
         new_msg = dict(msg)
-        content = msg.get("content")
-        if isinstance(content, str):
-            new_msg["content"] = pseudo.mask(content)
-        elif isinstance(content, list):
-            new_parts = []
-            for part in content:
-                if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
-                    new_part = dict(part)
-                    new_part["text"] = pseudo.mask(part["text"])
-                    new_parts.append(new_part)
-                else:
-                    new_parts.append(part)
-            new_msg["content"] = new_parts
+        # MCP/tool payloads are API JSON. Full NER on every agent round dominated
+        # DataForSEO wall time (~10–20 s/miss). Keep regex masking for structured IDs.
+        structured_only = msg.get("role") == "tool"
+        if "content" in msg:
+            new_msg["content"] = _mask_content(
+                msg.get("content"),
+                pseudo,
+                structured_only=structured_only,
+            )
         masked.append(new_msg)
     return masked
 

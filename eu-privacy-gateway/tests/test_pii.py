@@ -256,6 +256,46 @@ def test_analysis_cache_reuses_static_paragraphs_when_one_fragment_changes():
     assert second.analysis_stats()["cache_misses"] == 1
 
 
+def test_mask_structured_skips_analyzer_analyze():
+    class BoomAnalyzer:
+        nlp_engine = None
+        registry = type("Reg", (), {"recognizers": []})()
+
+        def analyze(self, *args, **kwargs):
+            raise AssertionError("full analyze must not run for structured masking")
+
+    _clear_analysis_cache()
+    pseudo = Pseudonymizer(BoomAnalyzer())
+    assert pseudo.mask_structured('{"search_volume": 3600, "cpc": 4.69}') == (
+        '{"search_volume": 3600, "cpc": 4.69}'
+    )
+    assert pseudo.analysis_stats()["cache_misses"] == 0
+
+
+def test_mask_messages_uses_structured_path_for_tool_role():
+    from gateway.app import _mask_messages
+
+    class BoomAnalyzer:
+        nlp_engine = None
+        registry = type("Reg", (), {"recognizers": []})()
+
+        def analyze(self, *args, **kwargs):
+            raise AssertionError("tool role must not call full NER")
+
+    _clear_analysis_cache()
+    pseudo = Pseudonymizer(BoomAnalyzer())
+    masked = _mask_messages(
+        [
+            {
+                "role": "tool",
+                "content": '{"keyword":"businessplan erstellen","search_volume":3600}',
+            },
+        ],
+        pseudo,
+    )
+    assert masked[0]["content"].startswith("{")
+    assert pseudo.analysis_stats()["cache_misses"] == 0
+
 if __name__ == "__main__":
     test_mask_and_restore_roundtrip()
     test_stream_restorer_splits_placeholder_across_chunks()
@@ -265,4 +305,5 @@ if __name__ == "__main__":
     test_date_not_masked_but_name_is()
     test_structured_categories_masked()
     test_tool_call_arguments_restored()
+    test_mask_structured_skips_analyzer_analyze()
     print("\nALL TESTS PASSED")
