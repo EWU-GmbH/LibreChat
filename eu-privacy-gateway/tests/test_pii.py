@@ -233,6 +233,29 @@ def test_analysis_cache_reuses_spans_without_reusing_pii_values():
     assert second.analysis_stats()["cache_hits"] == 1
 
 
+def test_analysis_cache_reuses_static_paragraphs_when_one_fragment_changes():
+    class FakeAnalyzer:
+        nlp_engine = None
+
+        def __init__(self):
+            self.calls = 0
+
+        def analyze(self, text, language, entities, score_threshold):
+            self.calls += 1
+            return []
+
+    _clear_analysis_cache()
+    analyzer = FakeAnalyzer()
+
+    Pseudonymizer(analyzer).mask("Statisch A\n\nZeit 1\n\nStatisch B")
+    second = Pseudonymizer(analyzer)
+    second.mask("Statisch A\n\nZeit 2\n\nStatisch B")
+
+    assert analyzer.calls == 4
+    assert second.analysis_stats()["cache_hits"] == 2
+    assert second.analysis_stats()["cache_misses"] == 1
+
+
 if __name__ == "__main__":
     test_mask_and_restore_roundtrip()
     test_stream_restorer_splits_placeholder_across_chunks()

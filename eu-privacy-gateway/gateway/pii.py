@@ -489,6 +489,11 @@ def _clear_analysis_cache() -> None:
         _ANALYSIS_CACHE.clear()
 
 
+def _analysis_chunks(text: str) -> List[str]:
+    """Split independent paragraphs so dynamic prompt fragments do not invalidate the whole cache."""
+    return re.split(r"(\n[ \t]*\n)", text)
+
+
 def _resolve_overlaps(results: List[RecognizerResult]) -> List[RecognizerResult]:
     """Greedily keep the highest-scoring, non-overlapping spans."""
     ordered = sorted(results, key=lambda r: (-r.score, r.start, -(r.end - r.start)))
@@ -530,6 +535,11 @@ class Pseudonymizer:
 
     def mask(self, text: str) -> str:
         if not text or not text.strip():
+            return text
+        return "".join(self._mask_chunk(chunk) for chunk in _analysis_chunks(text))
+
+    def _mask_chunk(self, text: str) -> str:
+        if not text.strip():
             return text
         started_at = time.perf_counter()
         results, cache_hit = _analyze(
