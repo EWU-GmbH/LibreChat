@@ -42,6 +42,31 @@ export interface LoadAgentParams {
   model_parameters?: AgentModelParameters & { model?: string };
 }
 
+async function getSelectedMCPTools(
+  req: LoadAgentParams['req'],
+  serverNames: Iterable<string>,
+  deps: LoadAgentDeps,
+): Promise<string[]> {
+  const tools: string[] = [];
+  const userId = req.user?.id ?? '';
+
+  for (const serverName of new Set(serverNames)) {
+    const overlayConfig = req.config?.mcpConfig?.[serverName];
+    const serverTools =
+      overlayConfig && requiresEphemeralUserConnection(overlayConfig)
+        ? null
+        : await deps.getMCPServerTools(userId, serverName);
+
+    if (!serverTools) {
+      tools.push(`${mcp_all}${mcp_delimiter}${serverName}`);
+      continue;
+    }
+    tools.push(...Object.keys(serverTools));
+  }
+
+  return tools;
+}
+
 /**
  * Load an ephemeral agent based on the request parameters.
  */
@@ -57,7 +82,6 @@ export async function loadEphemeralAgent(
   }
   const ephemeralAgent: TEphemeralAgent | undefined = req.body?.ephemeralAgent;
   const mcpServers = new Set<string>(ephemeralAgent?.mcp);
-  const userId = req.user?.id ?? '';
   if (modelSpec?.mcpServers) {
     for (const mcpServer of modelSpec.mcpServers) {
       mcpServers.add(mcpServer);
@@ -74,28 +98,7 @@ export async function loadEphemeralAgent(
     tools.push(Tools.web_search);
   }
 
-  const addedServers = new Set<string>();
-  if (mcpServers.size > 0) {
-    for (const mcpServer of mcpServers) {
-      if (addedServers.has(mcpServer)) {
-        continue;
-      }
-      /** Request-tier overlays are invisible to the cache service's registry
-       *  resolver — overlay-scoped servers expand fresh via `mcp_all` instead */
-      const overlayConfig = req.config?.mcpConfig?.[mcpServer];
-      const serverTools =
-        overlayConfig && requiresEphemeralUserConnection(overlayConfig)
-          ? null
-          : await deps.getMCPServerTools(userId, mcpServer);
-      if (!serverTools) {
-        tools.push(`${mcp_all}${mcp_delimiter}${mcpServer}`);
-        addedServers.add(mcpServer);
-        continue;
-      }
-      tools.push(...Object.keys(serverTools));
-      addedServers.add(mcpServer);
-    }
-  }
+  tools.push(...(await getSelectedMCPTools(req, mcpServers, deps)));
 
   const requestPromptPrefix = req.body?.promptPrefix;
   const { promptPrefix: modelPromptPrefix, ...safeModelParameters } =
@@ -184,5 +187,24 @@ export async function loadAgent(
   // Set version count from versions array length
   const agentWithVersion = agent as Agent & { versions?: unknown[]; version?: number };
   agentWithVersion.version = agentWithVersion.versions ? agentWithVersion.versions.length : 0;
-  return agent;
+
+  const baselineTools = (agent.tools ?? []).filter((tool) => !tool.includes(mcp_delimiter));
+  const selectedServers = req.body?.ephemeralAgent?.mcp?.slice(-1) ?? [];
+  if (selectedServers.length === 0) {
+    return baselineTools.length === agent.tools?.length
+      ? agent
+      : {
+          ...agent,
+          tools: baselineTools,
+        };
+  }
+
+  const selectedTools = await getSelectedMCPTools(req, selectedServers, deps);
+  const tools = new Set(baselineTools);
+  selectedTools.forEach((tool) => tools.add(tool));
+
+  return {
+    ...agent,
+    tools: Array.from(tools),
+  };
 }

@@ -214,6 +214,193 @@ describe('loadAgent', () => {
     expect(result!.version).toBe(1);
   });
 
+  test('should not load MCP tools for a persistent agent when none are selected', async () => {
+    const userId = new mongoose.Types.ObjectId();
+    const agentId = `agent_${uuidv4()}`;
+
+    await createAgent({
+      id: agentId,
+      name: 'Persistent Agent',
+      provider: 'openai',
+      model: 'gpt-4',
+      author: userId,
+      tools: ['web_search'],
+    });
+
+    const result = await loadAgent(
+      {
+        req: {
+          user: { id: userId.toString() },
+          body: { ephemeralAgent: { mcp: [] } },
+        },
+        agent_id: agentId,
+        endpoint: 'agents',
+      },
+      deps,
+    );
+
+    expect(mockGetMCPServerTools).not.toHaveBeenCalled();
+    expect(result?.tools).toEqual(['web_search']);
+  });
+
+  test('should add only chat-selected MCP server tools to a persistent agent', async () => {
+    const userId = new mongoose.Types.ObjectId();
+    const agentId = `agent_${uuidv4()}`;
+
+    await createAgent({
+      id: agentId,
+      name: 'Persistent Agent',
+      provider: 'openai',
+      model: 'gpt-4',
+      author: userId,
+      tools: ['web_search'],
+    });
+    mockGetMCPServerTools.mockImplementation(async (_userId: string, server: string) => {
+      if (server === 'dataforseo') {
+        return {
+          docs_search_mcp_dataforseo: {},
+          api_request_mcp_dataforseo: {},
+        };
+      }
+      return { list_surveys_mcp_formbricks: {} };
+    });
+
+    const result = await loadAgent(
+      {
+        req: {
+          user: { id: userId.toString() },
+          body: { ephemeralAgent: { mcp: ['dataforseo'] } },
+        },
+        agent_id: agentId,
+        endpoint: 'agents',
+      },
+      deps,
+    );
+
+    expect(mockGetMCPServerTools).toHaveBeenCalledTimes(1);
+    expect(mockGetMCPServerTools).toHaveBeenCalledWith(userId.toString(), 'dataforseo');
+    expect(result?.tools).toEqual([
+      'web_search',
+      'docs_search_mcp_dataforseo',
+      'api_request_mcp_dataforseo',
+    ]);
+    expect(result?.tools).not.toContain('list_surveys_mcp_formbricks');
+  });
+
+  test('should replace pre-baked agent MCP tools with the chat selection', async () => {
+    const userId = new mongoose.Types.ObjectId();
+    const agentId = `agent_${uuidv4()}`;
+    const d = Constants.mcp_delimiter;
+
+    await createAgent({
+      id: agentId,
+      name: 'EWU KI like',
+      provider: 'openai',
+      model: 'gpt-4',
+      author: userId,
+      tools: [
+        'web_search',
+        `${Constants.mcp_server}${d}dataforseo`,
+        `${Constants.mcp_all}${d}dataforseo`,
+        `${Constants.mcp_server}${d}formbricks`,
+        `${Constants.mcp_all}${d}formbricks`,
+      ],
+    });
+    mockGetMCPServerTools.mockImplementation(async (_userId: string, server: string) => ({
+      [`tool_mcp_${server}`]: {},
+    }));
+
+    const result = await loadAgent(
+      {
+        req: {
+          user: { id: userId.toString() },
+          body: { ephemeralAgent: { mcp: ['dataforseo'] } },
+        },
+        agent_id: agentId,
+        endpoint: 'agents',
+      },
+      deps,
+    );
+
+    const formbricksLeft = (result?.tools ?? []).filter((t) => t.includes('formbricks'));
+    expect(formbricksLeft).toEqual([]);
+    expect(result?.tools).toEqual(['web_search', 'tool_mcp_dataforseo']);
+  });
+
+  test('should load only the most recently selected MCP server for a persistent agent', async () => {
+    const userId = new mongoose.Types.ObjectId();
+    const agentId = `agent_${uuidv4()}`;
+
+    await createAgent({
+      id: agentId,
+      name: 'Persistent Agent',
+      provider: 'openai',
+      model: 'gpt-4',
+      author: userId,
+      tools: ['web_search'],
+    });
+    mockGetMCPServerTools.mockImplementation(async (_userId: string, server: string) => ({
+      [`tool_mcp_${server}`]: {},
+    }));
+
+    const result = await loadAgent(
+      {
+        req: {
+          user: { id: userId.toString() },
+          body: { ephemeralAgent: { mcp: ['formbricks', 'dataforseo'] } },
+        },
+        agent_id: agentId,
+        endpoint: 'agents',
+      },
+      deps,
+    );
+
+    expect(mockGetMCPServerTools).toHaveBeenCalledTimes(1);
+    expect(mockGetMCPServerTools).toHaveBeenCalledWith(userId.toString(), 'dataforseo');
+    expect(result?.tools).toEqual(['web_search', 'tool_mcp_dataforseo']);
+  });
+
+  test('should use all-tools expansion for a selected request-scoped MCP server', async () => {
+    const userId = new mongoose.Types.ObjectId();
+    const agentId = `agent_${uuidv4()}`;
+
+    await createAgent({
+      id: agentId,
+      name: 'Persistent Agent',
+      provider: 'openai',
+      model: 'gpt-4',
+      author: userId,
+      tools: ['web_search'],
+    });
+    mockGetMCPServerTools.mockResolvedValue({ cached_mcp_scoped: {} });
+
+    const result = await loadAgent(
+      {
+        req: {
+          user: { id: userId.toString() },
+          config: {
+            mcpConfig: {
+              scoped: {
+                type: 'streamable-http',
+                url: 'https://mcp.example.com/{{LIBRECHAT_BODY_CONVERSATIONID}}/mcp',
+              },
+            },
+          } as unknown as AppConfig,
+          body: { ephemeralAgent: { mcp: ['scoped'] } },
+        },
+        agent_id: agentId,
+        endpoint: 'agents',
+      },
+      deps,
+    );
+
+    expect(mockGetMCPServerTools).not.toHaveBeenCalled();
+    expect(result?.tools).toEqual([
+      'web_search',
+      `${Constants.mcp_all}${Constants.mcp_delimiter}scoped`,
+    ]);
+  });
+
   test('should return agent even when user is not author (permissions checked at route level)', async () => {
     const authorId = new mongoose.Types.ObjectId();
     const userId = new mongoose.Types.ObjectId();
