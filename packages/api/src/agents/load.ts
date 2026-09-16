@@ -188,13 +188,19 @@ export async function loadAgent(
   const agentWithVersion = agent as Agent & { versions?: unknown[]; version?: number };
   agentWithVersion.version = agentWithVersion.versions ? agentWithVersion.versions.length : 0;
 
-  const selectedServers = req.body?.ephemeralAgent?.mcp ?? [];
+  const baselineTools = (agent.tools ?? []).filter((tool) => !tool.includes(mcp_delimiter));
+  const selectedServers = req.body?.ephemeralAgent?.mcp?.slice(-1) ?? [];
   if (selectedServers.length === 0) {
-    return agent;
+    return baselineTools.length === agent.tools?.length
+      ? agent
+      : {
+          ...agent,
+          tools: baselineTools,
+        };
   }
 
   const selectedTools = await getSelectedMCPTools(req, selectedServers, deps);
-  const tools = new Set(agent.tools ?? []);
+  const tools = new Set(baselineTools);
   selectedTools.forEach((tool) => tools.add(tool));
 
   return {

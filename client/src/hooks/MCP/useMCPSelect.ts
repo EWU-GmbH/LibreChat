@@ -11,6 +11,12 @@ import { setTimestamp } from '~/utils/timestamps';
 /** Sentinel in `interface.defaultPinnedTools` that pins the MCP dropdown to the prompt bar. */
 const MCP_PIN_KEYWORD = 'mcp';
 
+/** The chat picker is intentionally exclusive; the most recent selection wins. */
+export function normalizeMCPSelection(value: string[]): string[] {
+  const selectedServer = value[value.length - 1];
+  return selectedServer ? [selectedServer] : [];
+}
+
 export function useMCPSelect({
   conversationId,
   storageContextKey,
@@ -71,19 +77,43 @@ export function useMCPSelect({
     }
   }, [startupConfig, servers, isPinned, setIsPinned]);
 
+  /** Stable memoized setter with dual-write to environment key */
+  const setMCPValues = useCallback(
+    (value: string[]) => {
+      if (!Array.isArray(value)) {
+        return;
+      }
+      const normalizedValue = normalizeMCPSelection(value);
+      setMCPValuesRaw(normalizedValue);
+      setEphemeralAgent((prev) => {
+        if (!isEqual(prev?.mcp, normalizedValue)) {
+          return { ...(prev ?? {}), mcp: normalizedValue };
+        }
+        return prev;
+      });
+      // Dual-write to environment key for new conversation defaults
+      if (storageContextKey) {
+        const envKey = `${LocalStorageKeys.LAST_MCP_}${storageContextKey}`;
+        localStorage.setItem(envKey, JSON.stringify(normalizedValue));
+        setTimestamp(envKey);
+      }
+    },
+    [setMCPValuesRaw, setEphemeralAgent, storageContextKey],
+  );
+
   // Sync ephemeral agent MCP → Jotai atom (strip unconfigured servers)
   useEffect(() => {
     const mcps = ephemeralAgent?.mcp;
     if (Array.isArray(mcps) && mcps.length > 0 && configuredServers.size > 0) {
-      const activeMcps = mcps.filter((mcp) => configuredServers.has(mcp));
-      if (!isEqual(activeMcps, mcpValues)) {
-        setMCPValuesRaw(activeMcps);
+      const activeMcps = normalizeMCPSelection(mcps.filter((mcp) => configuredServers.has(mcp)));
+      if (!isEqual(activeMcps, mcpValues) || !isEqual(activeMcps, mcps)) {
+        setMCPValues(activeMcps);
       }
     } else if (Array.isArray(mcps) && mcps.length === 0 && mcpValues.length > 0) {
       // Ephemeral agent explicitly has empty MCP (e.g., spec with no MCP servers) — clear atom
       setMCPValuesRaw([]);
     }
-  }, [ephemeralAgent?.mcp, setMCPValuesRaw, configuredServers, mcpValues]);
+  }, [ephemeralAgent?.mcp, configuredServers, mcpValues, setMCPValues]);
 
   // Write timestamp when MCP values change
   useEffect(() => {
@@ -92,29 +122,6 @@ export function useMCPSelect({
       setTimestamp(mcpStorageKey);
     }
   }, [mcpValues, mcpAtomKey]);
-
-  /** Stable memoized setter with dual-write to environment key */
-  const setMCPValues = useCallback(
-    (value: string[]) => {
-      if (!Array.isArray(value)) {
-        return;
-      }
-      setMCPValuesRaw(value);
-      setEphemeralAgent((prev) => {
-        if (!isEqual(prev?.mcp, value)) {
-          return { ...(prev ?? {}), mcp: value };
-        }
-        return prev;
-      });
-      // Dual-write to environment key for new conversation defaults
-      if (storageContextKey) {
-        const envKey = `${LocalStorageKeys.LAST_MCP_}${storageContextKey}`;
-        localStorage.setItem(envKey, JSON.stringify(value));
-        setTimestamp(envKey);
-      }
-    },
-    [setMCPValuesRaw, setEphemeralAgent, storageContextKey],
-  );
 
   return {
     isPinned,
