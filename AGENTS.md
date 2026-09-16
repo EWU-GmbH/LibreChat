@@ -32,11 +32,9 @@ Note: a prebuilt-environment boot may discard untracked files (`node_modules`,
 `client/dist`, generated `.env` / `librechat.yaml`). `start.sh` detects this and
 rebuilds via `build-app.sh`, so the app is runnable on every boot.
 
-This is a multi-repo workspace: the repositories are checked out under
-`/agent/repos/` and the working directory for environment commands is the
-workspace root, not the repo. Always `cd /agent/repos/LibreChat` before running
-the setup scripts or npm scripts (the committed environment commands already do
-this).
+Cursor checks this repository out directly under `/workspace` and runs
+environment commands from that repository root. The committed commands use
+relative paths so they also work when the checkout root changes.
 
 ## Backing services (Docker, host networking)
 

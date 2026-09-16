@@ -15,7 +15,10 @@ source "$REPO_ROOT/.cursor/setup/docker-lib.sh"
 if ! command -v docker >/dev/null 2>&1; then
   echo "==> Installing Docker engine and fuse-overlayfs"
   sudo apt-get update
-  sudo apt-get install -y docker.io fuse-overlayfs
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    -o Dpkg::Options::="--force-confold" \
+    --no-install-recommends \
+    docker.io fuse-overlayfs
 fi
 sudo mkdir -p /etc/docker
 if [ ! -f /etc/docker/daemon.json ]; then
