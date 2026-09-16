@@ -515,6 +515,27 @@ describe('MCPServerInspector', () => {
       });
     });
 
+    it('should expose only allowlisted MCP tools', async () => {
+      mockConnection.fetchTools = jest.fn().mockResolvedValue([
+        {
+          name: 'list_surveys',
+          description: 'List surveys',
+          inputSchema: { type: 'object' },
+        },
+        {
+          name: 'delete_survey',
+          description: 'Delete survey',
+          inputSchema: { type: 'object' },
+        },
+      ]);
+
+      const result = await MCPServerInspector.getToolFunctions('formbricks', mockConnection, [
+        'list_surveys',
+      ]);
+
+      expect(Object.keys(result)).toEqual(['list_surveys_mcp_formbricks']);
+    });
+
     it('should handle empty tools list', async () => {
       mockConnection.fetchTools = jest.fn().mockResolvedValue([]);
 

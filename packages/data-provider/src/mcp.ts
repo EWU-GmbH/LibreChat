@@ -176,6 +176,8 @@ const BaseOptionsSchema = z.object({
   initTimeout: z.number().int().nonnegative().optional(),
   /** Controls visibility in chat dropdown menu (MCPSelect) */
   chatMenu: z.boolean().optional(),
+  /** Admin-managed allowlist of MCP tool names exposed by this server. */
+  allowedTools: z.array(z.string().min(1)).min(1).optional(),
   /**
    * Controls server instruction behavior:
    * - undefined/not set: No instructions included (default)
@@ -385,6 +387,7 @@ const omitServerManagedFields = <T extends z.ZodObject<z.ZodRawShape>>(schema: T
     sseReadTimeout: true,
     initTimeout: true,
     chatMenu: true,
+    allowedTools: true,
     serverInstructions: true,
     requiresOAuth: true,
     customUserVars: true,
