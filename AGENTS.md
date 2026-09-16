@@ -131,3 +131,27 @@ Railway GraphQL / REST calls from the VM must send a browser-like `User-Agent`
 `uaParser` middleware, which rejects requests without a browser-like
 `User-Agent` (`"Illegal request"`); include a `Mozilla/5.0 ...` UA on admin API
 calls (agent creation, permissions, `/api/agents/chat`).
+
+## Reference documentation (LibreChat)
+
+Consult the official LibreChat docs before changing features/config (German
+variant: swap `/docs` for `/de/docs`):
+
+- Docs home: https://www.librechat.ai/docs
+- Image generation & editing: https://www.librechat.ai/docs/features/image_gen
+- Changelog / releases: https://www.librechat.ai/changelog
+
+Image-generation notes (from the docs):
+
+- There is **no separate image page** — image generation runs by chatting with
+  an **Agent** that has an image tool enabled (`OpenAI Image Tools`/`gpt-image-1`,
+  `Gemini Image Tools`, `Flux`, `Stable Diffusion`, legacy `DALL·E`).
+- Every image tool requires a `prompt`. If the model calls the tool without one
+  (`Missing required field: prompt`), the fix is model/agent-config (a stronger
+  tool-calling model + explicit agent instructions), not a code change.
+- Flux uses `FLUX_API_KEY` and, in this environment, `FLUX_API_BASE_URL=https://api.bfl.ai`
+  (the regional hosts are unreachable). Note the default endpoint `/v1/flux-pro`
+  is not entitled for the current key — use `/v1/flux-pro-1.1`.
+- If Flux tool-calling stays unreliable, `OpenAI Image Tools` (`IMAGE_GEN_OAI_API_KEY`,
+  `gpt-image-1`) or `Gemini Image Tools` (`GEMINI_API_KEY`) are alternative,
+  well-supported image tools.
