@@ -8,5 +8,5 @@
       "command": "cd /agent/repos/LibreChat && npm run backend:dev"
     }
   ],
-  "ports": [3080]
+  "ports": [{ "name": "librechat", "port": 3080 }]
 }
