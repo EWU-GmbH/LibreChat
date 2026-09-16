@@ -111,6 +111,38 @@ def test_real_names_masked():
             assert token not in masked, f"name leaked: {token!r} in {masked!r}"
 
 
+# --- Precision: ORGANIZATION / DATE_TIME must NOT be masked ----------------
+
+# spaCy tags product/company names as ORGANIZATION and years/dates as DATE_TIME.
+# These carry little PII value and corrupt the prompt when masked, so the
+# gateway drops them. Each item lists tokens that must survive verbatim.
+ORG_DATE_CASES = [
+    ("Ich arbeite bei der Firma Siemens.", ["Siemens"]),
+    ("Ich nutze ein iPhone von Apple.", ["iPhone", "Apple"]),
+    ("Erstelle ein Bild mit Flux im Jahr 2024.", ["Flux", "2024"]),
+    ("Am 15. März 2024 findet das Treffen statt.", ["15", "März", "2024"]),
+    ("Das Meeting ist am Montag um 14 Uhr.", ["Montag", "14"]),
+    ("Die Zitrone kostet 2 Euro bei Aldi.", ["Zitrone", "Aldi"]),
+]
+
+
+def test_organization_and_date_not_masked():
+    for text, survivors in ORG_DATE_CASES:
+        masked = _mask(text)
+        for tok in survivors:
+            assert tok in masked, f"ORG/DATE token wrongly masked: {tok!r} in {text!r} -> {masked!r}"
+        assert "[ORGANIZATION_" not in masked, f"ORGANIZATION masked in {text!r} -> {masked!r}"
+        assert "[DATE_TIME_" not in masked, f"DATE_TIME masked in {text!r} -> {masked!r}"
+
+
+def test_date_not_masked_but_name_is():
+    # A date and a real name in the same sentence: date survives, name masked.
+    masked = _mask("Am 15. März 2024 traf ich Angela Merkel.")
+    assert "2024" in masked and "März" in masked
+    assert "[PERSON_" in masked
+    assert "Angela" not in masked and "Merkel" not in masked
+
+
 # --- Recall: every structured / regex category must still be masked --------
 
 STRUCTURED_CASES = [
@@ -168,6 +200,8 @@ if __name__ == "__main__":
     test_stream_restorer_splits_placeholder_across_chunks()
     test_common_nouns_not_masked()
     test_real_names_masked()
+    test_organization_and_date_not_masked()
+    test_date_not_masked_but_name_is()
     test_structured_categories_masked()
     test_tool_call_arguments_restored()
     print("\nALL TESTS PASSED")

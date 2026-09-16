@@ -44,6 +44,15 @@ ENTITY_LABELS: Dict[str, str] = {
     "DE_LICENSE_PLATE": "KFZ",
 }
 
+# The gateway masks ONLY these entity types. Analysis is restricted to this
+# allowlist, so anything else spaCy/Presidio detects is never masked. In
+# particular ORGANIZATION and DATE_TIME (spaCy tags product names like "Flux",
+# generic words, and years/dates) are intentionally excluded: they carry little
+# PII value and, when masked, corrupt the prompt (e.g. a masked product name or
+# year the model then cannot reason about). Real PII stays covered: names
+# (PERSON), places (LOCATION), and every structured/regex category below.
+SUPPORTED_ENTITIES: List[str] = list(ENTITY_LABELS.keys())
+
 DEFAULT_SCORE_THRESHOLD = 0.35
 
 # --- GLiNER (high-recall NER) configuration -------------------------------
@@ -454,7 +463,12 @@ class Pseudonymizer:
     def mask(self, text: str) -> str:
         if not text or not text.strip():
             return text
-        results = self._analyzer.analyze(text=text, language="de", score_threshold=self._threshold)
+        results = self._analyzer.analyze(
+            text=text,
+            language="de",
+            entities=SUPPORTED_ENTITIES,
+            score_threshold=self._threshold,
+        )
         results = _filter_person_results(text, list(results), self._nlp)
         kept = _resolve_overlaps(results)
         # Replace from right to left so indices stay valid.
