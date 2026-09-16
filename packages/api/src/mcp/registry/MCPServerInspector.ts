@@ -151,18 +151,13 @@ export class MCPServerInspector {
     const capabilities = this.connection!.client.getServerCapabilities();
     this.config.capabilities = JSON.stringify(capabilities);
     const tools = await this.connection!.fetchTools();
-    const allowedTools = this.config.allowedTools ? new Set(this.config.allowedTools) : null;
-    this.config.tools = tools
-      .filter((tool) => allowedTools == null || allowedTools.has(tool.name))
-      .map((tool) => tool.name)
-      .join(', ');
+    this.config.tools = tools.map((tool) => tool.name).join(', ');
   }
 
   private async fetchToolFunctions(): Promise<void> {
     this.config.toolFunctions = await MCPServerInspector.getToolFunctions(
       this.serverName,
       this.connection!,
-      this.config.allowedTools,
     );
   }
 
@@ -170,31 +165,26 @@ export class MCPServerInspector {
    * Converts server tools to LibreChat-compatible tool functions format.
    * @param serverName - The name of the server
    * @param connection - The MCP connection
-   * @param allowedToolNames - Optional allowlist of server-native tool names
    * @returns Tool functions formatted for LibreChat
    */
   public static async getToolFunctions(
     serverName: string,
     connection: MCPConnection,
-    allowedToolNames?: string[],
   ): Promise<t.LCAvailableTools> {
     const tools = await connection.fetchTools();
-    const allowedTools = allowedToolNames ? new Set(allowedToolNames) : null;
 
     const toolFunctions: t.LCAvailableTools = {};
-    tools
-      .filter((tool) => allowedTools == null || allowedTools.has(tool.name))
-      .forEach((tool) => {
-        const name = `${tool.name}${Constants.mcp_delimiter}${serverName}`;
-        toolFunctions[name] = {
-          type: 'function',
-          ['function']: {
-            name,
-            description: tool.description,
-            parameters: tool.inputSchema as JsonSchemaType,
-          },
-        };
-      });
+    tools.forEach((tool) => {
+      const name = `${tool.name}${Constants.mcp_delimiter}${serverName}`;
+      toolFunctions[name] = {
+        type: 'function',
+        ['function']: {
+          name,
+          description: tool.description,
+          parameters: tool.inputSchema as JsonSchemaType,
+        },
+      };
+    });
 
     return toolFunctions;
   }
