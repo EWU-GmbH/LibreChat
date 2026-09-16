@@ -78,11 +78,7 @@ _ANALYSIS_CACHE_LOCK = Lock()
 # acceptable, so the gateway is tuned for high recall on PERSON NAMES and STREET
 # ADDRESSES. GLiNER (a zero-shot span model) complements spaCy, which alone
 # misses names such as "Dr. Müller".
-GLINER_ENABLED = os.environ.get("GATEWAY_USE_GLINER", "1").lower() not in {
-    "0",
-    "false",
-    "no",
-}
+GLINER_ENABLED = os.environ.get("GATEWAY_USE_GLINER", "1").lower() not in {"0", "false", "no"}
 GLINER_MODEL = os.environ.get("GLINER_MODEL", "urchade/gliner_multi_pii-v1")
 # Recall-oriented detection threshold for GLiNER itself.
 GLINER_THRESHOLD = float(os.environ.get("GLINER_THRESHOLD", "0.30"))
@@ -106,34 +102,13 @@ GLINER_LABEL_MAP: Dict[str, str] = {
 # ONLY to PERSON; the structured/regex categories (IBAN, EMAIL, PHONE, ADDRESS,
 # PLZ, KUNDENNUMMER, AKTENZEICHEN, STEUERID, KV/RV-Nummer, KFZ, CREDIT_CARD) are
 # never filtered, so their recall is unchanged.
-PERSON_FILTER_ENABLED = os.environ.get("GATEWAY_PERSON_FILTER", "1").lower() not in {
-    "0",
-    "false",
-    "no",
-}
+PERSON_FILTER_ENABLED = os.environ.get("GATEWAY_PERSON_FILTER", "1").lower() not in {"0", "false", "no"}
 
 # Personal titles/salutations that make a following capitalized token a name.
 _PERSON_TITLES = {
-    "herr",
-    "herrn",
-    "hr",
-    "frau",
-    "fr",
-    "frl",
-    "fräulein",
-    "dr",
-    "prof",
-    "dipl",
-    "ing",
-    "mag",
-    "med",
-    "jur",
-    "mr",
-    "mrs",
-    "ms",
-    "miss",
-    "sir",
-    "lady",
+    "herr", "herrn", "hr", "frau", "fr", "frl", "fräulein",
+    "dr", "prof", "dipl", "ing", "mag", "med", "jur",
+    "mr", "mrs", "ms", "miss", "sir", "lady",
 }
 
 # Curated German common nouns (food/objects/everyday words) that NER models
@@ -143,112 +118,21 @@ _PERSON_TITLES = {
 # accidentally suppressed (multi-token names bypass this list entirely).
 _COMMON_NOUN_ALLOWLIST = {
     # fruit / food
-    "zitrone",
-    "apfel",
-    "banane",
-    "orange",
-    "birne",
-    "traube",
-    "kirsche",
-    "erdbeere",
-    "pfirsich",
-    "pflaume",
-    "melone",
-    "ananas",
-    "mango",
-    "kiwi",
-    "tomate",
-    "gurke",
-    "kartoffel",
-    "zwiebel",
-    "karotte",
-    "möhre",
-    "paprika",
-    "brot",
-    "brötchen",
-    "kuchen",
-    "torte",
-    "keks",
-    "schokolade",
-    "käse",
-    "wurst",
-    "fleisch",
-    "fisch",
-    "suppe",
-    "salat",
-    "nudeln",
-    "reis",
-    "ei",
-    "butter",
-    "milch",
-    "sahne",
-    "zucker",
-    "salz",
-    "pfeffer",
-    "honig",
-    "kaffee",
-    "tee",
-    "wasser",
-    "saft",
-    "bier",
-    "wein",
-    "essen",
-    "getränk",
+    "zitrone", "apfel", "banane", "orange", "birne", "traube", "kirsche",
+    "erdbeere", "pfirsich", "pflaume", "melone", "ananas", "mango", "kiwi",
+    "tomate", "gurke", "kartoffel", "zwiebel", "karotte", "möhre", "paprika",
+    "brot", "brötchen", "kuchen", "torte", "keks", "schokolade", "käse",
+    "wurst", "fleisch", "fisch", "suppe", "salat", "nudeln", "reis", "ei",
+    "butter", "milch", "sahne", "zucker", "salz", "pfeffer", "honig",
+    "kaffee", "tee", "wasser", "saft", "bier", "wein", "essen", "getränk",
     # common objects / places / nature
-    "bar",
-    "tisch",
-    "stuhl",
-    "sofa",
-    "bett",
-    "lampe",
-    "fenster",
-    "tür",
-    "haus",
-    "wohnung",
-    "zimmer",
-    "küche",
-    "garten",
-    "auto",
-    "fahrrad",
-    "zug",
-    "baum",
-    "blume",
-    "rose",
-    "gras",
-    "wald",
-    "wiese",
-    "berg",
-    "fluss",
-    "meer",
-    "see",
-    "strand",
-    "himmel",
-    "sonne",
-    "mond",
-    "stern",
-    "wolke",
-    "regen",
-    "hund",
-    "katze",
-    "maus",
-    "pferd",
-    "kuh",
-    "schwein",
-    "huhn",
-    "buch",
-    "stift",
-    "papier",
-    "computer",
-    "handy",
-    "uhr",
-    "brille",
-    "tasche",
-    "ball",
-    "spiel",
-    "musik",
-    "bild",
-    "foto",
-    "film",
+    "bar", "tisch", "stuhl", "sofa", "bett", "lampe", "fenster", "tür",
+    "haus", "wohnung", "zimmer", "küche", "garten", "auto", "fahrrad", "zug",
+    "baum", "blume", "rose", "gras", "wald", "wiese", "berg", "fluss", "meer",
+    "see", "strand", "himmel", "sonne", "mond", "stern", "wolke", "regen",
+    "hund", "katze", "maus", "pferd", "kuh", "schwein", "huhn",
+    "buch", "stift", "papier", "computer", "handy", "uhr", "brille", "tasche",
+    "ball", "spiel", "musik", "bild", "foto", "film",
 }
 
 
@@ -274,11 +158,7 @@ def _build_analyzer() -> AnalyzerEngine:
         gliner = _try_build_gliner_recognizer()
         if gliner is not None:
             analyzer.registry.add_recognizer(gliner)
-            log.info(
-                "GLiNER recognizer registered (model=%s, threshold=%s)",
-                GLINER_MODEL,
-                GLINER_THRESHOLD,
-            )
+            log.info("GLiNER recognizer registered (model=%s, threshold=%s)", GLINER_MODEL, GLINER_THRESHOLD)
 
     return analyzer
 
@@ -355,9 +235,7 @@ class GLiNERRecognizer(EntityRecognizer):
                 text, self._prompt_labels, threshold=self._threshold
             )
         except Exception as exc:  # noqa: BLE001 - degrade to spaCy + regex.
-            log.warning(
-                "GLiNER inference failed (%s); skipping GLiNER for this text.", exc
-            )
+            log.warning("GLiNER inference failed (%s); skipping GLiNER for this text.", exc)
             return []
 
         results: List[RecognizerResult] = []
@@ -453,47 +331,27 @@ def _german_recognizers() -> List[PatternRecognizer]:
             supported_entity="DE_TAX_ID",
             supported_language="de",
             patterns=[Pattern("de_steuerid", r"\b\d{11}\b", 0.4)],
-            context=[
-                "steuer",
-                "steuer-id",
-                "steueridentifikationsnummer",
-                "idnr",
-                "steuernummer",
-            ],
+            context=["steuer", "steuer-id", "steueridentifikationsnummer", "idnr", "steuernummer"],
         ),
         # Krankenversichertennummer: letter + 9 digits, e.g. "A123456789".
         PatternRecognizer(
             supported_entity="DE_HEALTH_INSURANCE_ID",
             supported_language="de",
             patterns=[Pattern("de_kvnr", r"\b[A-Z]\d{9}\b", 0.55)],
-            context=[
-                "versichertennummer",
-                "krankenversicherung",
-                "kv-nummer",
-                "kvnr",
-                "krankenkasse",
-            ],
+            context=["versichertennummer", "krankenversicherung", "kv-nummer", "kvnr", "krankenkasse"],
         ),
         # Rentenversicherungs-/Sozialversicherungsnummer, e.g. "65170839J003".
         PatternRecognizer(
             supported_entity="DE_SOCIAL_INSURANCE_ID",
             supported_language="de",
             patterns=[Pattern("de_rvnr", r"\b\d{2}\s?\d{6}\s?[A-Z]\s?\d{3}\b", 0.6)],
-            context=[
-                "rentenversicherung",
-                "sozialversicherung",
-                "rvnr",
-                "sv-nummer",
-                "versicherungsnummer",
-            ],
+            context=["rentenversicherung", "sozialversicherung", "rvnr", "sv-nummer", "versicherungsnummer"],
         ),
         # KFZ-Kennzeichen (license plate), e.g. "E-AB 1234".
         PatternRecognizer(
             supported_entity="DE_LICENSE_PLATE",
             supported_language="de",
-            patterns=[
-                Pattern("de_kfz", r"\b[A-ZÄÖÜ]{1,3}-[A-Z]{1,2}\s?\d{1,4}\b", 0.5)
-            ],
+            patterns=[Pattern("de_kfz", r"\b[A-ZÄÖÜ]{1,3}-[A-Z]{1,2}\s?\d{1,4}\b", 0.5)],
             context=["kfz", "kennzeichen", "fahrzeug", "auto", "pkw"],
         ),
     ]
@@ -603,9 +461,7 @@ def _analyze(
             if cached is not None:
                 _ANALYSIS_CACHE.move_to_end(cache_key)
                 return [
-                    RecognizerResult(
-                        entity_type=entity, start=start, end=end, score=score
-                    )
+                    RecognizerResult(entity_type=entity, start=start, end=end, score=score)
                     for entity, start, end, score in cached
                 ], True
 
@@ -618,8 +474,7 @@ def _analyze(
     filtered = _filter_person_results(text, list(results), nlp)
     if cache_size > 0:
         cache_value = tuple(
-            (result.entity_type, result.start, result.end, result.score)
-            for result in filtered
+            (result.entity_type, result.start, result.end, result.score) for result in filtered
         )
         with _ANALYSIS_CACHE_LOCK:
             _ANALYSIS_CACHE[cache_key] = cache_value
@@ -650,9 +505,7 @@ class Pseudonymizer:
 
     _PLACEHOLDER_RE = re.compile(r"\[[A-Z_]+_\d+\]")
 
-    def __init__(
-        self, analyzer: AnalyzerEngine, score_threshold: float = DEFAULT_SCORE_THRESHOLD
-    ):
+    def __init__(self, analyzer: AnalyzerEngine, score_threshold: float = DEFAULT_SCORE_THRESHOLD):
         self._analyzer = analyzer
         self._threshold = score_threshold
         self._nlp = _get_spacy_nlp(analyzer)
