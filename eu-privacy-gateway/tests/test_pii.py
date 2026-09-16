@@ -1,10 +1,16 @@
-"""Smoke tests for German PII masking + reversible restore + stream stitching."""
+"""Tests for German PII masking: recall on real PII, precision on common nouns.
+
+These lock in the precision fix for the gateway: real names + every structured
+category must still be masked, while ordinary German nouns (food/objects) and
+pronouns must NOT be masked, so the model receives the user's actual words.
+"""
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from gateway.app import _restore_tool_calls
 from gateway.pii import Pseudonymizer, StreamRestorer, get_analyzer
 
 SAMPLE = (
@@ -13,9 +19,16 @@ SAMPLE = (
     "Diagnose Hypertonie."
 )
 
+# One shared analyzer for the whole module (loading it is expensive).
+_ANALYZER = get_analyzer()
+
+
+def _mask(text: str) -> str:
+    return Pseudonymizer(_ANALYZER).mask(text)
+
 
 def test_mask_and_restore_roundtrip():
-    pseudo = Pseudonymizer(get_analyzer())
+    pseudo = Pseudonymizer(_ANALYZER)
     masked = pseudo.mask(SAMPLE)
     print("\nMASKED:", masked)
     print("MAPPING:", pseudo.mapping_summary())
@@ -35,7 +48,7 @@ def test_mask_and_restore_roundtrip():
 
 
 def test_stream_restorer_splits_placeholder_across_chunks():
-    pseudo = Pseudonymizer(get_analyzer())
+    pseudo = Pseudonymizer(_ANALYZER)
     pseudo.mask(SAMPLE)
     # Find the person placeholder to simulate a model echoing it back.
     person_ph = next(p for p in pseudo.mapping_summary() if p.startswith("[PERSON_"))
@@ -53,7 +66,108 @@ def test_stream_restorer_splits_placeholder_across_chunks():
     assert "[IBAN_" not in out
 
 
+# --- Precision: common nouns / pronouns must NOT be masked -----------------
+
+# Each item is a (text, must-survive-substring) pair. The substring must remain
+# verbatim in the masked output (i.e. it was NOT replaced by a placeholder).
+COMMON_NOUN_CASES = [
+    ("Erstelle ein Bild von einer Zitrone an einer Bar", "Zitrone"),
+    ("Erstelle ein Bild von einer Zitrone an einer Bar", "Bar"),
+    ("eine Zitrone an einer Bar", "Zitrone"),
+    ("Zitrone", "Zitrone"),
+    ("Ich hätte gern einen Apfel und eine Banane zum Essen.", "Apfel"),
+    ("Ich hätte gern einen Apfel und eine Banane zum Essen.", "Banane"),
+    ("Ich hätte gern einen Apfel und eine Banane zum Essen.", "Ich"),
+    ("Das Essen war lecker.", "Essen"),
+    ("Der Hund läuft im Garten.", "Hund"),
+    ("Auf dem Tisch steht eine Lampe.", "Tisch"),
+]
+
+
+def test_common_nouns_not_masked():
+    for text, keep in COMMON_NOUN_CASES:
+        masked = _mask(text)
+        assert keep in masked, f"common noun wrongly masked: {keep!r} in {text!r} -> {masked!r}"
+        assert "[PERSON_" not in masked, f"unexpected PERSON placeholder in {text!r} -> {masked!r}"
+
+
+# --- Recall: real names must still be masked -------------------------------
+
+REAL_NAME_CASES = [
+    ("Angela Merkel war Bundeskanzlerin.", "Angela Merkel"),
+    ("Herr Müller kommt morgen.", "Müller"),
+    ("Sehr geehrter Herr Dr. Katharina Vogel", "Katharina Vogel"),
+    ("Bitte kontaktieren Sie Frau Schmidt.", "Schmidt"),
+]
+
+
+def test_real_names_masked():
+    for text, name in REAL_NAME_CASES:
+        pseudo = Pseudonymizer(_ANALYZER)
+        masked = pseudo.mask(text)
+        assert "[PERSON_" in masked, f"name not masked in {text!r} -> {masked!r}"
+        # No part of the raw name should survive in the masked text.
+        for token in name.split():
+            assert token not in masked, f"name leaked: {token!r} in {masked!r}"
+
+
+# --- Recall: every structured / regex category must still be masked --------
+
+STRUCTURED_CASES = [
+    ("Meine IBAN ist DE89370400440532013000.", "IBAN", "DE89370400440532013000"),
+    ("Kontakt: max.mustermann@example.com", "EMAIL", "max.mustermann@example.com"),
+    ("Ruf mich an unter 0170 1234567.", "PHONE", "0170 1234567"),
+    ("wohnhaft Musterstraße 12", "ADDRESS", "Musterstraße 12"),
+    ("wohnhaft Musterstraße 12, 45127 Essen", "PLZ", "45127"),
+    ("Kundennummer 4711-8890", "KUNDENNUMMER", "4711-8890"),
+    ("Aktenzeichen AZ 12 C 345/24", "AKTENZEICHEN", "12 C 345/24"),
+    ("Steuer-ID 12345678901", "STEUERID", "12345678901"),
+    ("Versichertennummer A123456789", "KVNUMMER", "A123456789"),
+    ("Rentenversicherungsnummer 65 170839 J 003", "RVNUMMER", "65 170839 J 003"),
+    ("Mein KFZ-Kennzeichen ist E-AB 1234.", "KFZ", "E-AB 1234"),
+    ("Kreditkarte 4111 1111 1111 1111", "CREDIT_CARD", "4111 1111 1111 1111"),
+]
+
+
+def test_structured_categories_masked():
+    for text, label, raw in STRUCTURED_CASES:
+        pseudo = Pseudonymizer(_ANALYZER)
+        masked = pseudo.mask(text)
+        assert f"[{label}_" in masked, (
+            f"{label} not masked in {text!r} -> {masked!r} (counts={pseudo.entity_type_counts()})"
+        )
+        assert raw not in masked, f"{label} raw value leaked: {raw!r} in {masked!r}"
+
+
+# --- Defense in depth: tool-call arguments are restored --------------------
+
+def test_tool_call_arguments_restored():
+    pseudo = Pseudonymizer(_ANALYZER)
+    # Seed a mapping as if a name had been masked on the request path.
+    masked = pseudo.mask("Angela Merkel")
+    person_ph = next(p for p in pseudo.mapping_summary() if p.startswith("[PERSON_"))
+    assert masked == person_ph
+
+    tool_calls = [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "search",
+                "arguments": '{"query": "' + person_ph + '"}',
+            },
+        }
+    ]
+    _restore_tool_calls(tool_calls, pseudo)
+    assert tool_calls[0]["function"]["arguments"] == '{"query": "Angela Merkel"}'
+    assert "[PERSON_" not in tool_calls[0]["function"]["arguments"]
+
+
 if __name__ == "__main__":
     test_mask_and_restore_roundtrip()
     test_stream_restorer_splits_placeholder_across_chunks()
+    test_common_nouns_not_masked()
+    test_real_names_masked()
+    test_structured_categories_masked()
+    test_tool_call_arguments_restored()
     print("\nALL TESTS PASSED")

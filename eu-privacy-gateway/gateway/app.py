@@ -238,6 +238,7 @@ async def _complete_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudony
         message = choice.get("message", {})
         if isinstance(message.get("content"), str):
             message["content"] = pseudo.restore(message["content"])
+        _restore_tool_calls(message.get("tool_calls"), pseudo)
     if VERBOSE_AUDIT:
         log.info("=== RESPONSE (restored, non-stream) ===")
         for choice in data.get("choices", []):
@@ -245,8 +246,30 @@ async def _complete_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudony
     return JSONResponse(content=data)
 
 
+def _restore_tool_calls(tool_calls: Any, pseudo: Pseudonymizer) -> None:
+    """De-anonymize placeholders inside assistant tool-call arguments in place.
+
+    Defense in depth: the PII filter should keep common nouns out of the prompt
+    in the first place, but if a placeholder ever slips into a tool argument
+    (e.g. an image ``prompt``), it must be restored to the real value before it
+    leaves the gateway — otherwise the tool would act on ``[PERSON_1]`` instead
+    of the user's actual word.
+    """
+    if not isinstance(tool_calls, list):
+        return
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            continue
+        function = tc.get("function")
+        if isinstance(function, dict) and isinstance(function.get("arguments"), str):
+            function["arguments"] = pseudo.restore(function["arguments"])
+
+
 async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymizer) -> AsyncGenerator[bytes, None]:
     restorer = StreamRestorer(pseudo)
+    # Per-tool-call-index restorers so a placeholder split across argument
+    # fragments (e.g. "[PER" + "SON_1]") is still stitched back together.
+    arg_restorers: Dict[int, StreamRestorer] = {}
     restored_full: List[str] = []
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream("POST", url, json=payload, headers=_headers()) as resp:
@@ -267,12 +290,16 @@ async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymi
                     if tail:
                         restored_full.append(tail)
                         yield _sse_delta(tail)
+                    for idx, ar in arg_restorers.items():
+                        arg_tail = ar.flush()
+                        if arg_tail:
+                            yield _sse_tool_arg_delta(idx, arg_tail)
                     yield b"data: [DONE]\n\n"
                     break
                 chunk = _try_json(data_str)
                 if chunk is None:
                     continue
-                emitted = _restore_stream_chunk(chunk, restorer)
+                emitted = _restore_stream_chunk(chunk, restorer, arg_restorers, pseudo)
                 if emitted:
                     restored_full.append(emitted)
                 yield f"data: {json.dumps(chunk)}\n\n".encode()
@@ -281,7 +308,12 @@ async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymi
         log.info("  %s", "".join(restored_full))
 
 
-def _restore_stream_chunk(chunk: Dict[str, Any], restorer: StreamRestorer) -> str:
+def _restore_stream_chunk(
+    chunk: Dict[str, Any],
+    restorer: StreamRestorer,
+    arg_restorers: Dict[int, StreamRestorer],
+    pseudo: Pseudonymizer,
+) -> str:
     emitted = ""
     for choice in chunk.get("choices", []):
         delta = choice.get("delta", {})
@@ -289,6 +321,22 @@ def _restore_stream_chunk(chunk: Dict[str, Any], restorer: StreamRestorer) -> st
             restored = restorer.push(delta["content"])
             delta["content"] = restored
             emitted += restored
+        # Restore placeholders inside streamed tool-call argument fragments.
+        tool_calls = delta.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for tc in tool_calls:
+                if not isinstance(tc, dict):
+                    continue
+                function = tc.get("function")
+                if not (isinstance(function, dict) and isinstance(function.get("arguments"), str)):
+                    continue
+                idx = tc.get("index", 0)
+                if not isinstance(idx, int):
+                    idx = 0
+                ar = arg_restorers.get(idx)
+                if ar is None:
+                    ar = arg_restorers[idx] = StreamRestorer(pseudo)
+                function["arguments"] = ar.push(function["arguments"])
     return emitted
 
 
@@ -298,6 +346,22 @@ def _sse_delta(content: str) -> bytes:
         "object": "chat.completion.chunk",
         "created": int(time.time()),
         "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+    }
+    return f"data: {json.dumps(chunk)}\n\n".encode()
+
+
+def _sse_tool_arg_delta(index: int, arguments: str) -> bytes:
+    chunk = {
+        "id": "chatcmpl-gateway-flush",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"tool_calls": [{"index": index, "function": {"arguments": arguments}}]},
+                "finish_reason": None,
+            }
+        ],
     }
     return f"data: {json.dumps(chunk)}\n\n".encode()
 

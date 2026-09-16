@@ -22,6 +22,7 @@ from presidio_analyzer import (
     RecognizerResult,
 )
 from presidio_analyzer.nlp_engine import NlpEngineProvider
+from presidio_analyzer.predefined_recognizers import CreditCardRecognizer
 
 log = logging.getLogger("eu-privacy-gateway.pii")
 
@@ -63,6 +64,50 @@ GLINER_LABEL_MAP: Dict[str, str] = {
     "address": "DE_ADDRESS",
 }
 
+# --- PERSON precision filter ----------------------------------------------
+# spaCy + GLiNER are high recall but, on German, frequently mislabel ordinary
+# (capitalized) nouns as PERSON — e.g. "Zitrone", "Apfel", "Banane", "Bar",
+# "Steuer-ID" — and even pronouns like "Ich". That corrupts the prompt before
+# it reaches the model. To keep GDPR recall on real names while killing these
+# false positives, a PERSON span is kept only when there is *name-like
+# evidence*: it contains a spaCy proper noun (``PROPN``), or it directly follows
+# a personal title (Herr/Frau/Dr. ...). Otherwise it is dropped. This is applied
+# ONLY to PERSON; the structured/regex categories (IBAN, EMAIL, PHONE, ADDRESS,
+# PLZ, KUNDENNUMMER, AKTENZEICHEN, STEUERID, KV/RV-Nummer, KFZ, CREDIT_CARD) are
+# never filtered, so their recall is unchanged.
+PERSON_FILTER_ENABLED = os.environ.get("GATEWAY_PERSON_FILTER", "1").lower() not in {"0", "false", "no"}
+
+# Personal titles/salutations that make a following capitalized token a name.
+_PERSON_TITLES = {
+    "herr", "herrn", "hr", "frau", "fr", "frl", "fräulein",
+    "dr", "prof", "dipl", "ing", "mag", "med", "jur",
+    "mr", "mrs", "ms", "miss", "sir", "lady",
+}
+
+# Curated German common nouns (food/objects/everyday words) that NER models
+# repeatedly mislabel as PERSON. Used as an explicit dictionary drop for
+# single-token PERSON spans (belt-and-suspenders on top of the POS check). Kept
+# lowercase; only unambiguous common nouns are listed so real surnames are not
+# accidentally suppressed (multi-token names bypass this list entirely).
+_COMMON_NOUN_ALLOWLIST = {
+    # fruit / food
+    "zitrone", "apfel", "banane", "orange", "birne", "traube", "kirsche",
+    "erdbeere", "pfirsich", "pflaume", "melone", "ananas", "mango", "kiwi",
+    "tomate", "gurke", "kartoffel", "zwiebel", "karotte", "möhre", "paprika",
+    "brot", "brötchen", "kuchen", "torte", "keks", "schokolade", "käse",
+    "wurst", "fleisch", "fisch", "suppe", "salat", "nudeln", "reis", "ei",
+    "butter", "milch", "sahne", "zucker", "salz", "pfeffer", "honig",
+    "kaffee", "tee", "wasser", "saft", "bier", "wein", "essen", "getränk",
+    # common objects / places / nature
+    "bar", "tisch", "stuhl", "sofa", "bett", "lampe", "fenster", "tür",
+    "haus", "wohnung", "zimmer", "küche", "garten", "auto", "fahrrad", "zug",
+    "baum", "blume", "rose", "gras", "wald", "wiese", "berg", "fluss", "meer",
+    "see", "strand", "himmel", "sonne", "mond", "stern", "wolke", "regen",
+    "hund", "katze", "maus", "pferd", "kuh", "schwein", "huhn",
+    "buch", "stift", "papier", "computer", "handy", "uhr", "brille", "tasche",
+    "ball", "spiel", "musik", "bild", "foto", "film",
+}
+
 
 def _build_analyzer() -> AnalyzerEngine:
     provider = NlpEngineProvider(
@@ -76,6 +121,11 @@ def _build_analyzer() -> AnalyzerEngine:
 
     for recognizer in _german_recognizers():
         analyzer.registry.add_recognizer(recognizer)
+
+    # Luhn-validated credit-card detection. Presidio ships this recognizer but
+    # only registers it for English by default; register it for German so
+    # CREDIT_CARD stays in scope for this DE-only gateway.
+    analyzer.registry.add_recognizer(CreditCardRecognizer(supported_language="de"))
 
     if GLINER_ENABLED:
         gliner = _try_build_gliner_recognizer()
@@ -280,6 +330,91 @@ def _german_recognizers() -> List[PatternRecognizer]:
     ]
 
 
+def _get_spacy_nlp(analyzer: AnalyzerEngine):
+    """Return the shared spaCy pipeline used by the analyzer (for POS tags).
+
+    Reuses Presidio's already-loaded ``de_core_news_lg`` so the PERSON filter
+    does not load a second copy of the model. Returns ``None`` if it cannot be
+    located, in which case the filter degrades to allowlist-only.
+    """
+    nlp_map = getattr(analyzer.nlp_engine, "nlp", None)
+    if isinstance(nlp_map, dict):
+        return nlp_map.get("de") or next(iter(nlp_map.values()), None)
+    return None
+
+
+def _person_has_name_evidence(text: str, start: int, end: int, doc) -> bool:
+    """Decide whether a PERSON span looks like a real name.
+
+    Keep it only when there is name-like evidence:
+      * the span contains a spaCy proper noun (``PROPN``) — real names such as
+        "Angela Merkel", "Müller", "Katharina Vogel" are PROPN, while common
+        nouns ("Zitrone", "Apfel", "Bar") are tagged ``NOUN`` and pronouns
+        ("Ich") ``PRON``; or
+      * the span directly follows a personal title (Herr/Frau/Dr. ...) and is
+        capitalized — this rescues names that spaCy fails to tag as PROPN.
+
+    Single-token common nouns from the curated allowlist are always dropped.
+    """
+    surface = text[start:end].strip()
+    if not surface:
+        return False
+
+    tokens = [t for t in doc if not (t.idx + len(t.text) <= start or t.idx >= end)]
+
+    # Explicit dictionary drop for single-token common nouns (e.g. "Zitrone").
+    if len(surface.split()) == 1 and surface.lower() in _COMMON_NOUN_ALLOWLIST:
+        return False
+
+    # Name-like evidence #1: a proper noun somewhere in the span.
+    if any(t.pos_ == "PROPN" for t in tokens):
+        return True
+
+    # Name-like evidence #2: preceded (within 3 tokens) by a personal title,
+    # and the span itself starts with a capital letter.
+    if tokens and surface[:1].isupper():
+        first_idx = min(t.i for t in tokens)
+        for j in range(max(0, first_idx - 3), first_idx):
+            if doc[j].text.strip(".").lower() in _PERSON_TITLES:
+                return True
+
+    return False
+
+
+def _filter_person_results(
+    text: str, results: List[RecognizerResult], nlp
+) -> List[RecognizerResult]:
+    """Drop PERSON false positives (common nouns/pronouns) using spaCy POS.
+
+    Only PERSON spans are examined; every other entity type is passed through
+    untouched so structured/regex recall is unaffected.
+    """
+    if not PERSON_FILTER_ENABLED:
+        return results
+    if not any(r.entity_type == "PERSON" for r in results):
+        return results
+
+    doc = nlp(text) if nlp is not None else None
+    filtered: List[RecognizerResult] = []
+    for res in results:
+        if res.entity_type != "PERSON":
+            filtered.append(res)
+            continue
+        surface = text[res.start : res.end].strip()
+        if doc is None:
+            # No POS available: fall back to the allowlist-only check.
+            if len(surface.split()) == 1 and surface.lower() in _COMMON_NOUN_ALLOWLIST:
+                log.debug("Dropping PERSON false positive (allowlist): %r", surface)
+                continue
+            filtered.append(res)
+            continue
+        if _person_has_name_evidence(text, res.start, res.end, doc):
+            filtered.append(res)
+        else:
+            log.debug("Dropping PERSON false positive (no name evidence): %r", surface)
+    return filtered
+
+
 def _resolve_overlaps(results: List[RecognizerResult]) -> List[RecognizerResult]:
     """Greedily keep the highest-scoring, non-overlapping spans."""
     ordered = sorted(results, key=lambda r: (-r.score, r.start, -(r.end - r.start)))
@@ -299,6 +434,7 @@ class Pseudonymizer:
     def __init__(self, analyzer: AnalyzerEngine, score_threshold: float = DEFAULT_SCORE_THRESHOLD):
         self._analyzer = analyzer
         self._threshold = score_threshold
+        self._nlp = _get_spacy_nlp(analyzer)
         self._counters: Dict[str, int] = {}
         self._value_to_placeholder: Dict[Tuple[str, str], str] = {}
         self.placeholder_to_value: Dict[str, str] = {}
@@ -319,7 +455,8 @@ class Pseudonymizer:
         if not text or not text.strip():
             return text
         results = self._analyzer.analyze(text=text, language="de", score_threshold=self._threshold)
-        kept = _resolve_overlaps(list(results))
+        results = _filter_person_results(text, list(results), self._nlp)
+        kept = _resolve_overlaps(results)
         # Replace from right to left so indices stay valid.
         for res in sorted(kept, key=lambda r: r.start, reverse=True):
             original = text[res.start : res.end]
