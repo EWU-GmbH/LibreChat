@@ -447,6 +447,43 @@ def _analysis_cache_key(analyzer: AnalyzerEngine, text: str, threshold: float) -
     return f"{id(analyzer)}:{threshold}:{len(text)}:{digest}"
 
 
+def _get_cached_analysis(
+    analyzer: AnalyzerEngine,
+    text: str,
+    threshold: float,
+) -> Optional[List[RecognizerResult]]:
+    cache_key = _analysis_cache_key(analyzer, text, threshold)
+    with _ANALYSIS_CACHE_LOCK:
+        cached = _ANALYSIS_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        _ANALYSIS_CACHE.move_to_end(cache_key)
+    return [
+        RecognizerResult(entity_type=entity, start=start, end=end, score=score)
+        for entity, start, end, score in cached
+    ]
+
+
+def _store_cached_analysis(
+    analyzer: AnalyzerEngine,
+    text: str,
+    threshold: float,
+    results: List[RecognizerResult],
+) -> None:
+    cache_size = _analysis_cache_size()
+    if cache_size == 0:
+        return
+    cache_key = _analysis_cache_key(analyzer, text, threshold)
+    cache_value = tuple(
+        (result.entity_type, result.start, result.end, result.score) for result in results
+    )
+    with _ANALYSIS_CACHE_LOCK:
+        _ANALYSIS_CACHE[cache_key] = cache_value
+        _ANALYSIS_CACHE.move_to_end(cache_key)
+        while len(_ANALYSIS_CACHE) > cache_size:
+            _ANALYSIS_CACHE.popitem(last=False)
+
+
 def _analyze(
     analyzer: AnalyzerEngine,
     nlp,
@@ -454,16 +491,10 @@ def _analyze(
     threshold: float,
 ) -> Tuple[List[RecognizerResult], bool]:
     cache_size = _analysis_cache_size()
-    cache_key = _analysis_cache_key(analyzer, text, threshold)
     if cache_size > 0:
-        with _ANALYSIS_CACHE_LOCK:
-            cached = _ANALYSIS_CACHE.get(cache_key)
-            if cached is not None:
-                _ANALYSIS_CACHE.move_to_end(cache_key)
-                return [
-                    RecognizerResult(entity_type=entity, start=start, end=end, score=score)
-                    for entity, start, end, score in cached
-                ], True
+        cached = _get_cached_analysis(analyzer, text, threshold)
+        if cached is not None:
+            return cached, True
 
     results = analyzer.analyze(
         text=text,
@@ -472,15 +503,7 @@ def _analyze(
         score_threshold=threshold,
     )
     filtered = _filter_person_results(text, list(results), nlp)
-    if cache_size > 0:
-        cache_value = tuple(
-            (result.entity_type, result.start, result.end, result.score) for result in filtered
-        )
-        with _ANALYSIS_CACHE_LOCK:
-            _ANALYSIS_CACHE[cache_key] = cache_value
-            _ANALYSIS_CACHE.move_to_end(cache_key)
-            while len(_ANALYSIS_CACHE) > cache_size:
-                _ANALYSIS_CACHE.popitem(last=False)
+    _store_cached_analysis(analyzer, text, threshold, filtered)
     return filtered, False
 
 
@@ -492,6 +515,42 @@ def _clear_analysis_cache() -> None:
 def _analysis_chunks(text: str) -> List[str]:
     """Split independent paragraphs so dynamic prompt fragments do not invalidate the whole cache."""
     return re.split(r"(\n[ \t]*\n)", text)
+
+
+def _prime_chunk_cache(
+    analyzer: AnalyzerEngine,
+    text: str,
+    threshold: float,
+    results: List[RecognizerResult],
+) -> None:
+    chunks = _analysis_chunks(text)
+    ranges: List[Tuple[int, str]] = []
+    offset = 0
+    for chunk in chunks:
+        if chunk.strip():
+            ranges.append((offset, chunk))
+        offset += len(chunk)
+
+    result_ranges: List[Tuple[int, str, List[RecognizerResult]]] = []
+    for start, chunk in ranges:
+        end = start + len(chunk)
+        local = [
+            RecognizerResult(
+                entity_type=result.entity_type,
+                start=result.start - start,
+                end=result.end - start,
+                score=result.score,
+            )
+            for result in results
+            if result.start >= start and result.end <= end
+        ]
+        result_ranges.append((start, chunk, local))
+
+    cached_result_count = sum(len(local) for _, _, local in result_ranges)
+    if cached_result_count != len(results):
+        return
+    for _, chunk, local in result_ranges:
+        _store_cached_analysis(analyzer, chunk, threshold, local)
 
 
 def _resolve_overlaps(results: List[RecognizerResult]) -> List[RecognizerResult]:
@@ -536,6 +595,24 @@ class Pseudonymizer:
     def mask(self, text: str) -> str:
         if not text or not text.strip():
             return text
+        full_cached = _get_cached_analysis(self._analyzer, text, self._threshold)
+        if full_cached is not None:
+            self._analysis_cache_hits += 1
+            return self._apply_results(text, full_cached)
+
+        chunks = _analysis_chunks(text)
+        has_cached_chunk = any(
+            chunk.strip()
+            and _get_cached_analysis(self._analyzer, chunk, self._threshold) is not None
+            for chunk in chunks
+        )
+        if not has_cached_chunk:
+            started_at = time.perf_counter()
+            results, _ = _analyze(self._analyzer, self._nlp, text, self._threshold)
+            self._analysis_duration_ms += (time.perf_counter() - started_at) * 1000
+            self._analysis_cache_misses += 1
+            _prime_chunk_cache(self._analyzer, text, self._threshold, results)
+            return self._apply_results(text, results)
         return "".join(self._mask_chunk(chunk) for chunk in _analysis_chunks(text))
 
     def _mask_chunk(self, text: str) -> str:
@@ -553,6 +630,9 @@ class Pseudonymizer:
             self._analysis_cache_hits += 1
         else:
             self._analysis_cache_misses += 1
+        return self._apply_results(text, results)
+
+    def _apply_results(self, text: str, results: List[RecognizerResult]) -> str:
         kept = _resolve_overlaps(results)
         # Replace from right to left so indices stay valid.
         for res in sorted(kept, key=lambda r: r.start, reverse=True):

@@ -251,7 +251,7 @@ def test_analysis_cache_reuses_static_paragraphs_when_one_fragment_changes():
     second = Pseudonymizer(analyzer)
     second.mask("Statisch A\n\nZeit 2\n\nStatisch B")
 
-    assert analyzer.calls == 4
+    assert analyzer.calls == 2
     assert second.analysis_stats()["cache_hits"] == 2
     assert second.analysis_stats()["cache_misses"] == 1
 
