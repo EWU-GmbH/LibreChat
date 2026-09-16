@@ -113,7 +113,7 @@ export function useMCPSelect({
       // Ephemeral agent explicitly has empty MCP (e.g., spec with no MCP servers) — clear atom
       setMCPValuesRaw([]);
     }
-  }, [ephemeralAgent?.mcp, configuredServers, mcpValues, setMCPValues]);
+  }, [ephemeralAgent?.mcp, configuredServers, mcpValues, setMCPValues, setMCPValuesRaw]);
 
   // Write timestamp when MCP values change
   useEffect(() => {
