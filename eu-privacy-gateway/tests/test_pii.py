@@ -94,8 +94,12 @@ COMMON_NOUN_CASES = [
 def test_common_nouns_not_masked():
     for text, keep in COMMON_NOUN_CASES:
         masked = _mask(text)
-        assert keep in masked, f"common noun wrongly masked: {keep!r} in {text!r} -> {masked!r}"
-        assert "[PERSON_" not in masked, f"unexpected PERSON placeholder in {text!r} -> {masked!r}"
+        assert (
+            keep in masked
+        ), f"common noun wrongly masked: {keep!r} in {text!r} -> {masked!r}"
+        assert (
+            "[PERSON_" not in masked
+        ), f"unexpected PERSON placeholder in {text!r} -> {masked!r}"
 
 
 # --- Recall: real names must still be masked -------------------------------
@@ -137,9 +141,15 @@ def test_organization_and_date_not_masked():
     for text, survivors in ORG_DATE_CASES:
         masked = _mask(text)
         for tok in survivors:
-            assert tok in masked, f"ORG/DATE token wrongly masked: {tok!r} in {text!r} -> {masked!r}"
-        assert "[ORGANIZATION_" not in masked, f"ORGANIZATION masked in {text!r} -> {masked!r}"
-        assert "[DATE_TIME_" not in masked, f"DATE_TIME masked in {text!r} -> {masked!r}"
+            assert (
+                tok in masked
+            ), f"ORG/DATE token wrongly masked: {tok!r} in {text!r} -> {masked!r}"
+        assert (
+            "[ORGANIZATION_" not in masked
+        ), f"ORGANIZATION masked in {text!r} -> {masked!r}"
+        assert (
+            "[DATE_TIME_" not in masked
+        ), f"DATE_TIME masked in {text!r} -> {masked!r}"
 
 
 def test_date_not_masked_but_name_is():
@@ -172,13 +182,14 @@ def test_structured_categories_masked():
     for text, label, raw in STRUCTURED_CASES:
         pseudo = Pseudonymizer(_ANALYZER)
         masked = pseudo.mask(text)
-        assert f"[{label}_" in masked, (
-            f"{label} not masked in {text!r} -> {masked!r} (counts={pseudo.entity_type_counts()})"
-        )
+        assert (
+            f"[{label}_" in masked
+        ), f"{label} not masked in {text!r} -> {masked!r} (counts={pseudo.entity_type_counts()})"
         assert raw not in masked, f"{label} raw value leaked: {raw!r} in {masked!r}"
 
 
 # --- Defense in depth: tool-call arguments are restored --------------------
+
 
 def test_tool_call_arguments_restored():
     pseudo = Pseudonymizer(_ANALYZER)

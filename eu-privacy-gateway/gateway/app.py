@@ -52,11 +52,15 @@ log = logging.getLogger("eu-privacy-gateway")
 
 
 def _upstream_config() -> Dict[str, Any]:
-    openrouter_key = os.environ.get("OPENROUTER_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    openrouter_key = os.environ.get("OPENROUTER_KEY") or os.environ.get(
+        "OPENROUTER_API_KEY"
+    )
     if openrouter_key:
         return {
             "provider": "openrouter",
-            "base_url": os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+            "base_url": os.environ.get(
+                "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+            ),
             "api_key": openrouter_key,
             "default_model": os.environ.get("GATEWAY_DEFAULT_MODEL", "openrouter/auto"),
             # Privacy routing: forbid providers that train on / retain data.
@@ -66,7 +70,9 @@ def _upstream_config() -> Dict[str, Any]:
         "provider": "mistral",
         "base_url": os.environ.get("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
         "api_key": os.environ.get("MISTRAL_API_KEY", ""),
-        "default_model": os.environ.get("GATEWAY_DEFAULT_MODEL", "mistral-small-latest"),
+        "default_model": os.environ.get(
+            "GATEWAY_DEFAULT_MODEL", "mistral-small-latest"
+        ),
         "extra_body": {},
     }
 
@@ -110,10 +116,23 @@ def models() -> Dict[str, Any]:
     # Model routing is pass-through: the concrete selectable model IDs are
     # curated in LibreChat's config. Advertise only the default (auto) here.
     ids = [UPSTREAM["default_model"]]
-    return {"object": "list", "data": [{"id": m, "object": "model", "created": now, "owned_by": "eu-privacy-gateway"} for m in ids]}
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": m,
+                "object": "model",
+                "created": now,
+                "owned_by": "eu-privacy-gateway",
+            }
+            for m in ids
+        ],
+    }
 
 
-def _mask_messages(messages: List[Dict[str, Any]], pseudo: Pseudonymizer) -> List[Dict[str, Any]]:
+def _mask_messages(
+    messages: List[Dict[str, Any]], pseudo: Pseudonymizer
+) -> List[Dict[str, Any]]:
     masked: List[Dict[str, Any]] = []
     for msg in messages:
         new_msg = dict(msg)
@@ -123,7 +142,11 @@ def _mask_messages(messages: List[Dict[str, Any]], pseudo: Pseudonymizer) -> Lis
         elif isinstance(content, list):
             new_parts = []
             for part in content:
-                if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+                if (
+                    isinstance(part, dict)
+                    and part.get("type") == "text"
+                    and isinstance(part.get("text"), str)
+                ):
                     new_part = dict(part)
                     new_part["text"] = pseudo.mask(part["text"])
                     new_parts.append(new_part)
@@ -134,7 +157,9 @@ def _mask_messages(messages: List[Dict[str, Any]], pseudo: Pseudonymizer) -> Lis
     return masked
 
 
-def _log_mask_summary(original: List[Dict[str, Any]], masked: List[Dict[str, Any]], pseudo: Pseudonymizer) -> None:
+def _log_mask_summary(
+    original: List[Dict[str, Any]], masked: List[Dict[str, Any]], pseudo: Pseudonymizer
+) -> None:
     """Audit the masking step.
 
     In production (VERBOSE_AUDIT off) only aggregate, non-sensitive information
@@ -166,7 +191,9 @@ def _log_mask_summary(original: List[Dict[str, Any]], masked: List[Dict[str, Any
     for m in masked:
         if isinstance(m.get("content"), str):
             log.info("  [%s] %s", m.get("role"), m["content"])
-    log.info("=== PII MAPPING (kept locally, %d entities) ===", len(pseudo.mapping_summary()))
+    log.info(
+        "=== PII MAPPING (kept locally, %d entities) ===", len(pseudo.mapping_summary())
+    )
     for placeholder, value in pseudo.mapping_summary().items():
         log.info("  %s -> %s", placeholder, value)
 
@@ -192,7 +219,9 @@ def _resolve_model(requested: Optional[str]) -> str:
     return requested
 
 
-def _build_upstream_payload(body: Dict[str, Any], masked_messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_upstream_payload(
+    body: Dict[str, Any], masked_messages: List[Dict[str, Any]]
+) -> Dict[str, Any]:
     payload = dict(body)
     payload["messages"] = masked_messages
     payload["model"] = _resolve_model(payload.get("model"))
@@ -202,7 +231,10 @@ def _build_upstream_payload(body: Dict[str, Any], masked_messages: List[Dict[str
 
 
 def _headers() -> Dict[str, str]:
-    headers = {"Authorization": f"Bearer {UPSTREAM['api_key']}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {UPSTREAM['api_key']}",
+        "Content-Type": "application/json",
+    }
     if UPSTREAM["provider"] == "openrouter":
         headers["HTTP-Referer"] = "https://librechat.local"
         headers["X-Title"] = "EU Privacy Gateway"
@@ -231,7 +263,9 @@ async def chat_completions(request: Request) -> Any:
     return await _complete_upstream(url, payload, pseudo)
 
 
-async def _complete_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymizer) -> Any:
+async def _complete_upstream(
+    url: str, payload: Dict[str, Any], pseudo: Pseudonymizer
+) -> Any:
     started_at = time.perf_counter()
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(url, json=payload, headers=_headers())
@@ -275,7 +309,9 @@ def _restore_tool_calls(tool_calls: Any, pseudo: Pseudonymizer) -> None:
             function["arguments"] = pseudo.restore(function["arguments"])
 
 
-async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymizer) -> AsyncGenerator[bytes, None]:
+async def _stream_upstream(
+    url: str, payload: Dict[str, Any], pseudo: Pseudonymizer
+) -> AsyncGenerator[bytes, None]:
     restorer = StreamRestorer(pseudo)
     # Per-tool-call-index restorers so a placeholder split across argument
     # fragments (e.g. "[PER" + "SON_1]") is still stitched back together.
@@ -300,7 +336,7 @@ async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymi
                     continue
                 if not line.startswith("data:"):
                     continue
-                data_str = line[len("data:"):].strip()
+                data_str = line[len("data:") :].strip()
                 if data_str == "[DONE]":
                     tail = restorer.flush()
                     if tail:
@@ -354,7 +390,10 @@ def _restore_stream_chunk(
                 if not isinstance(tc, dict):
                     continue
                 function = tc.get("function")
-                if not (isinstance(function, dict) and isinstance(function.get("arguments"), str)):
+                if not (
+                    isinstance(function, dict)
+                    and isinstance(function.get("arguments"), str)
+                ):
                     continue
                 idx = tc.get("index", 0)
                 if not isinstance(idx, int):
@@ -384,7 +423,11 @@ def _sse_tool_arg_delta(index: int, arguments: str) -> bytes:
         "choices": [
             {
                 "index": 0,
-                "delta": {"tool_calls": [{"index": index, "function": {"arguments": arguments}}]},
+                "delta": {
+                    "tool_calls": [
+                        {"index": index, "function": {"arguments": arguments}}
+                    ]
+                },
                 "finish_reason": None,
             }
         ],
