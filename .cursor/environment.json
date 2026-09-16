@@ -1,11 +1,11 @@
 {
   "name": "LibreChat",
-  "install": "cd /agent/repos/LibreChat && bash .cursor/setup/install.sh",
-  "start": "cd /agent/repos/LibreChat && bash .cursor/setup/start.sh",
+  "install": "bash .cursor/setup/install.sh",
+  "start": "bash .cursor/setup/start.sh",
   "terminals": [
     {
       "name": "backend",
-      "command": "cd /agent/repos/LibreChat && npm run backend:dev"
+      "command": "npm run backend:dev"
     }
   ],
   "ports": [{ "name": "librechat", "port": 3080 }]

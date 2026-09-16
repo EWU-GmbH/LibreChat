@@ -12,10 +12,16 @@ source "$REPO_ROOT/.cursor/setup/stack.env"
 source "$REPO_ROOT/.cursor/setup/docker-lib.sh"
 
 # 1. Docker engine + fuse-overlayfs (nested-VM storage driver).
+# Builds have no TTY; keep apt noninteractive so conffile prompts (e.g. fuse.conf)
+# cannot hang or fail the install phase.
 if ! command -v docker >/dev/null 2>&1; then
   echo "==> Installing Docker engine and fuse-overlayfs"
+  export DEBIAN_FRONTEND=noninteractive
   sudo apt-get update
-  sudo apt-get install -y docker.io fuse-overlayfs
+  sudo apt-get install -y \
+    -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold" \
+    docker.io fuse-overlayfs
 fi
 sudo mkdir -p /etc/docker
 if [ ! -f /etc/docker/daemon.json ]; then
