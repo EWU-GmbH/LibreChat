@@ -11,7 +11,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from gateway.app import _restore_tool_calls
-from gateway.pii import Pseudonymizer, StreamRestorer, get_analyzer
+from presidio_analyzer import RecognizerResult
+
+from gateway.pii import (
+    Pseudonymizer,
+    StreamRestorer,
+    _clear_analysis_cache,
+    get_analyzer,
+)
 
 SAMPLE = (
     "Bitte fasse zusammen: Patient Dr. Katharina Vogel, Kundennummer 4711-8890, "
@@ -193,6 +200,37 @@ def test_tool_call_arguments_restored():
     _restore_tool_calls(tool_calls, pseudo)
     assert tool_calls[0]["function"]["arguments"] == '{"query": "Angela Merkel"}'
     assert "[PERSON_" not in tool_calls[0]["function"]["arguments"]
+
+
+def test_analysis_cache_reuses_spans_without_reusing_pii_values():
+    class FakeAnalyzer:
+        nlp_engine = None
+
+        def __init__(self):
+            self.calls = 0
+
+        def analyze(self, text, language, entities, score_threshold):
+            self.calls += 1
+            return [
+                RecognizerResult(
+                    entity_type="EMAIL_ADDRESS",
+                    start=0,
+                    end=len(text),
+                    score=1.0,
+                )
+            ]
+
+    _clear_analysis_cache()
+    analyzer = FakeAnalyzer()
+    first = Pseudonymizer(analyzer)
+    second = Pseudonymizer(analyzer)
+
+    assert first.mask("erste@example.com") == "[EMAIL_1]"
+    assert second.mask("erste@example.com") == "[EMAIL_1]"
+    assert second.restore("[EMAIL_1]") == "erste@example.com"
+    assert analyzer.calls == 1
+    assert first.analysis_stats()["cache_misses"] == 1
+    assert second.analysis_stats()["cache_hits"] == 1
 
 
 if __name__ == "__main__":

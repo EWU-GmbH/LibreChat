@@ -12,6 +12,10 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
+from collections import OrderedDict
+from hashlib import sha256
+from threading import Lock
 from typing import Dict, List, Optional, Tuple
 
 from presidio_analyzer import (
@@ -54,6 +58,20 @@ ENTITY_LABELS: Dict[str, str] = {
 SUPPORTED_ENTITIES: List[str] = list(ENTITY_LABELS.keys())
 
 DEFAULT_SCORE_THRESHOLD = 0.35
+DEFAULT_ANALYSIS_CACHE_SIZE = 2048
+
+
+def _analysis_cache_size() -> int:
+    raw = os.environ.get("GATEWAY_PII_CACHE_SIZE", str(DEFAULT_ANALYSIS_CACHE_SIZE))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return DEFAULT_ANALYSIS_CACHE_SIZE
+
+
+_CachedResult = Tuple[str, int, int, float]
+_ANALYSIS_CACHE: "OrderedDict[str, Tuple[_CachedResult, ...]]" = OrderedDict()
+_ANALYSIS_CACHE_LOCK = Lock()
 
 # --- GLiNER (high-recall NER) configuration -------------------------------
 # EWU has confirmed there is NO health data, and an occasional missed CITY is
@@ -424,6 +442,53 @@ def _filter_person_results(
     return filtered
 
 
+def _analysis_cache_key(analyzer: AnalyzerEngine, text: str, threshold: float) -> str:
+    digest = sha256(text.encode("utf-8")).hexdigest()
+    return f"{id(analyzer)}:{threshold}:{len(text)}:{digest}"
+
+
+def _analyze(
+    analyzer: AnalyzerEngine,
+    nlp,
+    text: str,
+    threshold: float,
+) -> Tuple[List[RecognizerResult], bool]:
+    cache_size = _analysis_cache_size()
+    cache_key = _analysis_cache_key(analyzer, text, threshold)
+    if cache_size > 0:
+        with _ANALYSIS_CACHE_LOCK:
+            cached = _ANALYSIS_CACHE.get(cache_key)
+            if cached is not None:
+                _ANALYSIS_CACHE.move_to_end(cache_key)
+                return [
+                    RecognizerResult(entity_type=entity, start=start, end=end, score=score)
+                    for entity, start, end, score in cached
+                ], True
+
+    results = analyzer.analyze(
+        text=text,
+        language="de",
+        entities=SUPPORTED_ENTITIES,
+        score_threshold=threshold,
+    )
+    filtered = _filter_person_results(text, list(results), nlp)
+    if cache_size > 0:
+        cache_value = tuple(
+            (result.entity_type, result.start, result.end, result.score) for result in filtered
+        )
+        with _ANALYSIS_CACHE_LOCK:
+            _ANALYSIS_CACHE[cache_key] = cache_value
+            _ANALYSIS_CACHE.move_to_end(cache_key)
+            while len(_ANALYSIS_CACHE) > cache_size:
+                _ANALYSIS_CACHE.popitem(last=False)
+    return filtered, False
+
+
+def _clear_analysis_cache() -> None:
+    with _ANALYSIS_CACHE_LOCK:
+        _ANALYSIS_CACHE.clear()
+
+
 def _resolve_overlaps(results: List[RecognizerResult]) -> List[RecognizerResult]:
     """Greedily keep the highest-scoring, non-overlapping spans."""
     ordered = sorted(results, key=lambda r: (-r.score, r.start, -(r.end - r.start)))
@@ -447,6 +512,9 @@ class Pseudonymizer:
         self._counters: Dict[str, int] = {}
         self._value_to_placeholder: Dict[Tuple[str, str], str] = {}
         self.placeholder_to_value: Dict[str, str] = {}
+        self._analysis_cache_hits = 0
+        self._analysis_cache_misses = 0
+        self._analysis_duration_ms = 0.0
 
     def _placeholder_for(self, entity_type: str, original: str) -> str:
         label = ENTITY_LABELS.get(entity_type, entity_type)
@@ -463,13 +531,18 @@ class Pseudonymizer:
     def mask(self, text: str) -> str:
         if not text or not text.strip():
             return text
-        results = self._analyzer.analyze(
-            text=text,
-            language="de",
-            entities=SUPPORTED_ENTITIES,
-            score_threshold=self._threshold,
+        started_at = time.perf_counter()
+        results, cache_hit = _analyze(
+            self._analyzer,
+            self._nlp,
+            text,
+            self._threshold,
         )
-        results = _filter_person_results(text, list(results), self._nlp)
+        self._analysis_duration_ms += (time.perf_counter() - started_at) * 1000
+        if cache_hit:
+            self._analysis_cache_hits += 1
+        else:
+            self._analysis_cache_misses += 1
         kept = _resolve_overlaps(results)
         # Replace from right to left so indices stay valid.
         for res in sorted(kept, key=lambda r: r.start, reverse=True):
@@ -505,6 +578,13 @@ class Pseudonymizer:
             label = match.group(1) if match else placeholder
             counts[label] = counts.get(label, 0) + 1
         return counts
+
+    def analysis_stats(self) -> Dict[str, float | int]:
+        return {
+            "cache_hits": self._analysis_cache_hits,
+            "cache_misses": self._analysis_cache_misses,
+            "duration_ms": round(self._analysis_duration_ms, 1),
+        }
 
 
 class StreamRestorer:

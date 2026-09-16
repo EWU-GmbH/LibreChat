@@ -144,11 +144,16 @@ def _log_mask_summary(original: List[Dict[str, Any]], masked: List[Dict[str, Any
     """
     counts = pseudo.entity_type_counts()
     total = sum(counts.values())
+    analysis = pseudo.analysis_stats()
     log.info(
-        "Masked %d PII entit%s across %d message(s); by type: %s",
+        "Masked %d PII entit%s across %d message(s) in %.1fms "
+        "(analysis cache: %d hit(s), %d miss(es)); by type: %s",
         total,
         "y" if total == 1 else "ies",
         len(original),
+        analysis["duration_ms"],
+        analysis["cache_hits"],
+        analysis["cache_misses"],
         counts or "{}",
     )
     if not VERBOSE_AUDIT:
@@ -227,8 +232,13 @@ async def chat_completions(request: Request) -> Any:
 
 
 async def _complete_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymizer) -> Any:
+    started_at = time.perf_counter()
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(url, json=payload, headers=_headers())
+    log.info(
+        "Upstream non-stream response completed in %.1fms",
+        (time.perf_counter() - started_at) * 1000,
+    )
     if resp.status_code >= 400:
         log.error("Upstream error %s: %s", resp.status_code, resp.text[:500])
         return JSONResponse(status_code=resp.status_code, content=_safe_json(resp.text))
@@ -271,8 +281,14 @@ async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymi
     # fragments (e.g. "[PER" + "SON_1]") is still stitched back together.
     arg_restorers: Dict[int, StreamRestorer] = {}
     restored_full: List[str] = []
+    started_at = time.perf_counter()
+    first_event_logged = False
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream("POST", url, json=payload, headers=_headers()) as resp:
+            log.info(
+                "Upstream stream headers received in %.1fms",
+                (time.perf_counter() - started_at) * 1000,
+            )
             if resp.status_code >= 400:
                 text = (await resp.aread()).decode("utf-8", "replace")
                 log.error("Upstream stream error %s: %s", resp.status_code, text[:500])
@@ -299,10 +315,20 @@ async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymi
                 chunk = _try_json(data_str)
                 if chunk is None:
                     continue
+                if not first_event_logged:
+                    log.info(
+                        "Upstream first stream event received in %.1fms",
+                        (time.perf_counter() - started_at) * 1000,
+                    )
+                    first_event_logged = True
                 emitted = _restore_stream_chunk(chunk, restorer, arg_restorers, pseudo)
                 if emitted:
                     restored_full.append(emitted)
                 yield f"data: {json.dumps(chunk)}\n\n".encode()
+    log.info(
+        "Upstream stream completed in %.1fms",
+        (time.perf_counter() - started_at) * 1000,
+    )
     if VERBOSE_AUDIT:
         log.info("=== RESPONSE (restored, streamed) ===")
         log.info("  %s", "".join(restored_full))
