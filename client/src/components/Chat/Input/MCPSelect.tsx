@@ -10,7 +10,15 @@ import { useHasAccess, useLocalize } from '~/hooks';
 import { useBadgeRowContext } from '~/Providers';
 import { cn } from '~/utils';
 
-function MCPSelectContent() {
+interface MCPSelectProps {
+  /**
+   * Keep the control mounted while unpinned. Required wherever the tools dropdown
+   * that re-pins it is not rendered, so the picker cannot become unreachable.
+   */
+  alwaysVisible?: boolean;
+}
+
+function MCPSelectContent({ alwaysVisible }: MCPSelectProps) {
   const localize = useLocalize();
   const context = useBadgeRowContext();
   const { conversationId, storageContextKey, mcpServerManager: manager } = context ?? {};
@@ -56,7 +64,7 @@ function MCPSelectContent() {
     getServerStatusIconProps,
   } = manager;
 
-  if (!isPinned && mcpValues?.length === 0) {
+  if (!isPinned && alwaysVisible !== true && mcpValues?.length === 0) {
     return null;
   }
 
@@ -133,7 +141,7 @@ function MCPSelectContent() {
   );
 }
 
-function MCPSelect() {
+function MCPSelect({ alwaysVisible }: MCPSelectProps) {
   const context = useBadgeRowContext();
   const { selectableServers } = context?.mcpServerManager ?? {};
   const canUseMcp = useHasAccess({
@@ -145,7 +153,7 @@ function MCPSelect() {
     return null;
   }
 
-  return <MCPSelectContent />;
+  return <MCPSelectContent alwaysVisible={alwaysVisible} />;
 }
 
 export default memo(MCPSelect);

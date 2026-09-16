@@ -139,4 +139,16 @@ describe('MCPSelect', () => {
     const { container } = render(<MCPSelect />);
     expect(container.firstChild).toBeNull();
   });
+
+  it('still renders when unpinned but marked always visible', () => {
+    mockMcpServerManager = { ...defaultMcpServerManager, isPinned: false, mcpValues: [] };
+    render(<MCPSelect alwaysVisible />);
+    expect(screen.getByRole('button', { name: /MCP Servers/i })).toBeInTheDocument();
+  });
+
+  it('renders nothing when always visible but user lacks MCP access', () => {
+    mockCanUseMcp = false;
+    const { container } = render(<MCPSelect alwaysVisible />);
+    expect(container.firstChild).toBeNull();
+  });
 });
