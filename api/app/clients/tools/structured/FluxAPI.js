@@ -156,6 +156,79 @@ class FluxAPI extends Tool {
     return applyAxiosProxyConfig(config, this.baseUrl);
   }
 
+  /**
+   * Polls the Flux API for a submitted task's result.
+   *
+   * BFL returns a region-specific `polling_url` in the submit response. The
+   * global host's `/v1/get_result` is routed by a global front door and often
+   * cannot see a task that was created in another region, returning HTTP 404
+   * ("Task not found"); with no retry this aborts the whole generation. We
+   * therefore prefer the returned `polling_url` and only fall back to the
+   * global endpoint when it is missing. Transient poll failures are retried
+   * with backoff so a single non-200 response does not abort the run.
+   *
+   * @param {Object} params
+   * @param {string} params.taskId - The task id returned by the submit call.
+   * @param {string} [params.pollingUrl] - The region-specific polling URL from BFL.
+   * @param {string} params.requestApiKey - The Flux API key to authorize polling.
+   * @returns {Promise<{ ok: boolean, resultData?: Object, message?: string }>}
+   */
+  async pollForResult({ taskId, pollingUrl, requestApiKey }) {
+    const usePollingUrl = typeof pollingUrl === 'string' && pollingUrl.length > 0;
+    const resultUrl = usePollingUrl ? pollingUrl : `${this.baseUrl}/v1/get_result`;
+
+    const maxAttempts = 60;
+    const maxConsecutiveErrors = 5;
+    let consecutiveErrors = 0;
+    let status = 'Pending';
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      try {
+        const requestConfig = {
+          headers: {
+            'x-key': requestApiKey,
+            Accept: 'application/json',
+          },
+          ...this.getAxiosConfig(),
+        };
+        if (!usePollingUrl) {
+          requestConfig.params = { id: taskId };
+        }
+        const resultResponse = await axios.get(resultUrl, requestConfig);
+        consecutiveErrors = 0;
+        status = resultResponse.data.status;
+
+        if (status === 'Ready') {
+          return { ok: true, resultData: resultResponse.data.result };
+        } else if (status === 'Error') {
+          logger.error('[FluxAPI] Error in task:', resultResponse.data);
+          return { ok: false, message: 'An error occurred during image generation.' };
+        } else if (typeof status === 'string' && status.includes('Moderated')) {
+          logger.warn('[FluxAPI] Task moderated:', status);
+          return {
+            ok: false,
+            message: 'The image request was moderated and could not be generated.',
+          };
+        }
+      } catch (error) {
+        consecutiveErrors += 1;
+        const details = this.getDetails(error?.response?.data || error.message);
+        logger.warn(
+          `[FluxAPI] Transient error while polling result (${consecutiveErrors}/${maxConsecutiveErrors}): ${details}`,
+        );
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          logger.error('[FluxAPI] Error while getting result:', details);
+          return { ok: false, message: 'An error occurred while retrieving the image.' };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000 * consecutiveErrors));
+      }
+    }
+
+    logger.error('[FluxAPI] Timed out while polling for result. Last status:', status);
+    return { ok: false, message: 'Timed out while waiting for the image to be generated.' };
+  }
+
   /** @param {Object|string} value */
   getDetails(value) {
     if (typeof value === 'string') {
@@ -235,7 +308,6 @@ class FluxAPI extends Tool {
     }
 
     const generateUrl = `${this.baseUrl}${imageData.endpoint || '/v1/flux-pro'}`;
-    const resultUrl = `${this.baseUrl}/v1/get_result`;
 
     logger.debug('[FluxAPI] Generating image with payload:', payload);
     logger.debug('[FluxAPI] Using endpoint:', generateUrl);
@@ -262,36 +334,16 @@ class FluxAPI extends Tool {
 
     const taskId = taskResponse.data.id;
 
-    // Polling for the result
-    let status = 'Pending';
-    let resultData = null;
-    while (status !== 'Ready' && status !== 'Error') {
-      try {
-        // Wait 2 seconds between polls
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        const resultResponse = await axios.get(resultUrl, {
-          headers: {
-            'x-key': requestApiKey,
-            Accept: 'application/json',
-          },
-          params: { id: taskId },
-          ...this.getAxiosConfig(),
-        });
-        status = resultResponse.data.status;
-
-        if (status === 'Ready') {
-          resultData = resultResponse.data.result;
-          break;
-        } else if (status === 'Error') {
-          logger.error('[FluxAPI] Error in task:', resultResponse.data);
-          return this.returnValue('An error occurred during image generation.');
-        }
-      } catch (error) {
-        const details = this.getDetails(error?.response?.data || error.message);
-        logger.error('[FluxAPI] Error while getting result:', details);
-        return this.returnValue('An error occurred while retrieving the image.');
-      }
+    // Polling for the result (prefers BFL's region-specific polling_url)
+    const poll = await this.pollForResult({
+      taskId,
+      pollingUrl: taskResponse.data.polling_url,
+      requestApiKey,
+    });
+    if (!poll.ok) {
+      return this.returnValue(poll.message);
     }
+    const resultData = poll.resultData;
 
     // If no result data
     if (!resultData || !resultData.sample) {
@@ -471,7 +523,6 @@ class FluxAPI extends Tool {
     }
 
     const generateUrl = `${this.baseUrl}${endpoint}`;
-    const resultUrl = `${this.baseUrl}/v1/get_result`;
 
     logger.debug('[FluxAPI] Generating finetuned image with payload:', payload);
     logger.debug('[FluxAPI] Using endpoint:', generateUrl);
@@ -497,36 +548,16 @@ class FluxAPI extends Tool {
 
     const taskId = taskResponse.data.id;
 
-    // Polling for the result
-    let status = 'Pending';
-    let resultData = null;
-    while (status !== 'Ready' && status !== 'Error') {
-      try {
-        // Wait 2 seconds between polls
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        const resultResponse = await axios.get(resultUrl, {
-          headers: {
-            'x-key': requestApiKey,
-            Accept: 'application/json',
-          },
-          params: { id: taskId },
-          ...this.getAxiosConfig(),
-        });
-        status = resultResponse.data.status;
-
-        if (status === 'Ready') {
-          resultData = resultResponse.data.result;
-          break;
-        } else if (status === 'Error') {
-          logger.error('[FluxAPI] Error in finetuned task:', resultResponse.data);
-          return this.returnValue('An error occurred during finetuned image generation.');
-        }
-      } catch (error) {
-        const details = this.getDetails(error?.response?.data || error.message);
-        logger.error('[FluxAPI] Error while getting finetuned result:', details);
-        return this.returnValue('An error occurred while retrieving the finetuned image.');
-      }
+    // Polling for the result (prefers BFL's region-specific polling_url)
+    const poll = await this.pollForResult({
+      taskId,
+      pollingUrl: taskResponse.data.polling_url,
+      requestApiKey,
+    });
+    if (!poll.ok) {
+      return this.returnValue(poll.message);
     }
+    const resultData = poll.resultData;
 
     // If no result data
     if (!resultData || !resultData.sample) {

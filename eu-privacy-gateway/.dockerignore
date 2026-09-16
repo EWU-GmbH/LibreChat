@@ -1,0 +1,8 @@
+.venv/
+**/__pycache__/
+*.pyc
+*.log
+.env
+tests/
+run.sh
+README.md
