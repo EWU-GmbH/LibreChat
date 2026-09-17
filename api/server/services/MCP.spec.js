@@ -1245,6 +1245,124 @@ describe('User parameter passing tests', () => {
         }),
       );
     });
+
+    it('forwards image-resolved arguments from the injected resolver', async () => {
+      const mockUser = { id: 'flux-user', role: 'USER' };
+      const { getRoleByName } = require('~/models');
+      getRoleByName.mockResolvedValue({
+        permissions: {
+          [PermissionTypes.MCP_SERVERS]: {
+            [Permissions.USE]: true,
+          },
+        },
+      });
+
+      const resolveToolImages = jest.fn(async ({ toolArguments }) => ({
+        ...toolArguments,
+        blocks: [{ type: 'image', src: 'data:image/png;base64,Zmx1eA==' }],
+      }));
+      const mockCallTool = jest.fn().mockResolvedValue(['ok', null]);
+      mockGetMCPManager.mockReturnValue({ callTool: mockCallTool });
+
+      const mcpTool = await createMCPTool({
+        resolveToolImages,
+        user: mockUser,
+        toolKey: `create_docx${D}documents`,
+        provider: 'openai',
+        availableTools: {
+          [`create_docx${D}documents`]: {
+            function: {
+              description: 'Create DOCX',
+              parameters: { type: 'object', properties: {} },
+            },
+          },
+        },
+      });
+
+      await expect(
+        mcpTool.invoke(
+          {
+            title: 'Flux-Bericht',
+            blocks: [{ type: 'image', src: 'lc-file:latest' }],
+          },
+          {
+            configurable: { user: mockUser },
+            metadata: {
+              provider: 'openai',
+              thread_id: 'thread-1',
+              run_id: 'run-1',
+            },
+            toolCall: {},
+          },
+        ),
+      ).resolves.toBe('ok');
+
+      expect(resolveToolImages).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serverName: 'documents',
+          toolName: 'create_docx',
+          user: mockUser,
+        }),
+      );
+      expect(mockCallTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toolArguments: {
+            title: 'Flux-Bericht',
+            blocks: [{ type: 'image', src: 'data:image/png;base64,Zmx1eA==' }],
+          },
+        }),
+      );
+    });
+
+    it('does not call the MCP server when image resolution fails', async () => {
+      const mockUser = { id: 'owner', role: 'USER' };
+      const { getRoleByName } = require('~/models');
+      getRoleByName.mockResolvedValue({
+        permissions: {
+          [PermissionTypes.MCP_SERVERS]: {
+            [Permissions.USE]: true,
+          },
+        },
+      });
+
+      const mockCallTool = jest.fn();
+      mockGetMCPManager.mockReturnValue({ callTool: mockCallTool });
+      const mcpTool = await createMCPTool({
+        resolveToolImages: async () => {
+          throw new Error('LibreChat image not found or access denied');
+        },
+        user: mockUser,
+        toolKey: `create_pdf${D}documents`,
+        provider: 'openai',
+        availableTools: {
+          [`create_pdf${D}documents`]: {
+            function: {
+              description: 'Create PDF',
+              parameters: { type: 'object', properties: {} },
+            },
+          },
+        },
+      });
+
+      await expect(
+        mcpTool.invoke(
+          {
+            title: 'Versuch',
+            blocks: [{ type: 'image', src: 'lc-file:file_other_user' }],
+          },
+          {
+            configurable: { user: mockUser },
+            metadata: {
+              provider: 'openai',
+              thread_id: 'thread-1',
+              run_id: 'run-1',
+            },
+            toolCall: {},
+          },
+        ),
+      ).rejects.toThrow('LibreChat image not found or access denied');
+      expect(mockCallTool).not.toHaveBeenCalled();
+    });
   });
 
   describe('reinitMCPServer (via reconnectServer)', () => {

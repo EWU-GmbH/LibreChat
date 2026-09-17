@@ -160,6 +160,8 @@ async function storeGeneratedFile(filename: string, extension: string, data: Buf
 const toolGuide =
   ' Übersetze Layout- und Designwünsche aus dem Chat in `layout` und `blocks` ' +
   '(Überschriften, Absätze, Listen, Tabellen, Linien, Abstände, Bilder). ' +
+  'Für das zuletzt im Chat erzeugte Bild nutze im Bildblock `src: "lc-file:latest"`; ' +
+  'für eine bekannte LibreChat-Datei `src: "lc-file:<file_id>"`. ' +
   'Bilder als öffentliche https-URL oder data-URI (PNG/JPEG, max. 2 MB, max. 12 Stück). ' +
   'Markdown in `content` bleibt möglich, inklusive ![alt](url).';
 

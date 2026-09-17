@@ -514,10 +514,12 @@ async function reconnectServer({
  * @param {import('@librechat/api').RequestBody} [params.requestBody]
  * @param {import('@librechat/api').RequestScopedMCPConnectionStore} [params.requestScopedConnections]
  * @param {Record<string, Record<string, string>>} [params.userMCPAuthMap]
+ * @param {ResolveToolImages} [params.resolveToolImages] - Resolves LibreChat image references in tool arguments.
  * @returns { Promise<Array<typeof tool | { _call: (toolInput: Object | string) => unknown}>> } An object with `_call` method to execute the tool input.
  */
 async function createMCPTools({
   res,
+  resolveToolImages,
   mcpPermissionContext,
   user,
   index,
@@ -588,6 +590,7 @@ async function createMCPTools({
   for (const tool of result.tools) {
     const toolInstance = await createMCPTool({
       res,
+      resolveToolImages,
       mcpPermissionContext,
       user,
       provider,
@@ -612,6 +615,7 @@ async function createMCPTools({
  * Creates a single tool from the specified MCP Server via `toolKey`.
  * @param {Object} params
  * @param {ServerResponse} params.res - The Express response object for sending events.
+ * @param {ResolveToolImages} [params.resolveToolImages] - Resolves LibreChat image references in tool arguments.
  * @param {{ canUseServers: (user?: IUser) => Promise<boolean> }} [params.mcpPermissionContext] - Request-scoped MCP permission context.
  * @param {IUser} params.user - The user from the request object.
  * @param {string} params.toolKey - The toolKey for the tool.
@@ -630,6 +634,7 @@ async function createMCPTools({
  */
 async function createMCPTool({
   res,
+  resolveToolImages,
   mcpPermissionContext,
   user,
   index,
@@ -727,6 +732,7 @@ async function createMCPTool({
 
   return createToolInstance({
     res,
+    resolveToolImages,
     mcpPermissionContext,
     user,
     requestBody,
@@ -742,6 +748,7 @@ async function createMCPTool({
 
 function createToolInstance({
   res,
+  resolveToolImages,
   mcpPermissionContext,
   user: capturedUser = null,
   requestBody: capturedRequestBody,
@@ -832,12 +839,20 @@ function createToolInstance({
       const customUserVars =
         config?.configurable?.userMCPAuthMap?.[`${Constants.mcp_prefix}${serverName}`];
 
+      const preparedToolArguments = resolveToolImages
+        ? await resolveToolImages({
+            serverName,
+            toolName,
+            toolArguments,
+            user: effectiveUser,
+          })
+        : toolArguments;
       const result = await mcpManager.callTool({
         serverName,
         serverConfig: capturedServerConfig,
         toolName,
         provider,
-        toolArguments,
+        toolArguments: preparedToolArguments,
         options: {
           signal: derivedSignal,
         },

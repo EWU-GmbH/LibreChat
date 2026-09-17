@@ -42,6 +42,7 @@ const {
   createMCPPermissionContext,
   resolveConfigServers,
 } = require('~/server/services/MCP');
+const { resolveDocumentToolImages } = require('~/server/services/Files/documentImages');
 const { getMCPRequestContext } = require('~/server/services/MCPRequestContext');
 const { createFileSearchTool, primeFiles: primeSearchFiles } = require('./fileSearch');
 const { primeFiles: primeCodeFiles } = require('~/server/services/Files/Code/process');
@@ -461,6 +462,7 @@ const loadTools = async ({
   const safeUser = createSafeUser(options.req?.user);
   const requestScopedConnections =
     options.requestScopedConnections ?? getMCPRequestContext(options.req, options.res);
+  const resolveToolImages = (params) => resolveDocumentToolImages({ ...params, req: options.req });
 
   for (const [serverName, toolConfigs] of Object.entries(requestedMCPTools)) {
     index++;
@@ -474,6 +476,7 @@ const loadTools = async ({
         const mcpParams = {
           mcpPermissionContext,
           index,
+          resolveToolImages,
           signal,
           user: safeUser,
           userMCPAuthMap,
