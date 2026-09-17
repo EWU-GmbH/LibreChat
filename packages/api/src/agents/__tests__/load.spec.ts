@@ -360,6 +360,79 @@ describe('loadAgent', () => {
     expect(result?.tools).toEqual(['web_search', 'tool_mcp_dataforseo']);
   });
 
+  test('should reject crafted ephemeralAgent.mcp servers outside user mcpAccess allowlist', async () => {
+    const userId = new mongoose.Types.ObjectId();
+    const agentId = `agent_${uuidv4()}`;
+
+    await createAgent({
+      id: agentId,
+      name: 'Persistent Agent',
+      provider: 'openai',
+      model: 'gpt-4',
+      author: userId,
+      tools: ['web_search'],
+    });
+    mockGetMCPServerTools.mockImplementation(async (_userId: string, server: string) => ({
+      [`tool_mcp_${server}`]: {},
+    }));
+
+    const result = await loadAgent(
+      {
+        req: {
+          user: {
+            id: userId.toString(),
+            role: 'USER',
+            mcpAccess: { policy: 'allowlist', servers: ['dataforseo'] },
+          },
+          body: { ephemeralAgent: { mcp: ['listmonk'] } },
+        },
+        agent_id: agentId,
+        endpoint: 'agents',
+      },
+      deps,
+    );
+
+    expect(mockGetMCPServerTools).not.toHaveBeenCalled();
+    expect(result?.tools).toEqual(['web_search']);
+    expect((result?.tools ?? []).some((t) => t.includes('listmonk'))).toBe(false);
+  });
+
+  test('should keep allowlisted MCP servers from ephemeralAgent.mcp', async () => {
+    const userId = new mongoose.Types.ObjectId();
+    const agentId = `agent_${uuidv4()}`;
+
+    await createAgent({
+      id: agentId,
+      name: 'Persistent Agent',
+      provider: 'openai',
+      model: 'gpt-4',
+      author: userId,
+      tools: ['web_search'],
+    });
+    mockGetMCPServerTools.mockImplementation(async (_userId: string, server: string) => ({
+      [`tool_mcp_${server}`]: {},
+    }));
+
+    const result = await loadAgent(
+      {
+        req: {
+          user: {
+            id: userId.toString(),
+            role: 'USER',
+            mcpAccess: { policy: 'allowlist', servers: ['dataforseo'] },
+          },
+          body: { ephemeralAgent: { mcp: ['dataforseo'] } },
+        },
+        agent_id: agentId,
+        endpoint: 'agents',
+      },
+      deps,
+    );
+
+    expect(mockGetMCPServerTools).toHaveBeenCalledWith(userId.toString(), 'dataforseo');
+    expect(result?.tools).toEqual(['web_search', 'tool_mcp_dataforseo']);
+  });
+
   test('should use all-tools expansion for a selected request-scoped MCP server', async () => {
     const userId = new mongoose.Types.ObjectId();
     const agentId = `agent_${uuidv4()}`;

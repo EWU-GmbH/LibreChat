@@ -22,6 +22,7 @@ const {
   requiresEphemeralUserConnection,
   containsGraphTokenPlaceholder,
   filterMCPServersForUser,
+  canAccessMCPServer,
 } = require('@librechat/api');
 const {
   Time,
@@ -530,6 +531,11 @@ async function createMCPTools({
   requestScopedConnections,
   streamId = null,
 }) {
+  if (!canAccessMCPServer(user, serverName)) {
+    logger.warn(`[MCP][${serverName}] Denied by mcpAccess policy for user ${user?.id}`);
+    return [];
+  }
+
   const serverConfig =
     config ?? (await getMCPServersRegistry().getServerConfig(serverName, user?.id, configServers));
 
@@ -640,6 +646,11 @@ async function createMCPTool({
   streamId = null,
 }) {
   const [toolName, serverName] = toolKey.split(Constants.mcp_delimiter);
+
+  if (!canAccessMCPServer(user, serverName)) {
+    logger.warn(`[MCP][${serverName}] Denied by mcpAccess policy for user ${user?.id}`);
+    return;
+  }
 
   const serverConfig =
     config ?? (await getMCPServersRegistry().getServerConfig(serverName, user?.id, configServers));
@@ -783,6 +794,9 @@ function createToolInstance({
         : await userCanUseMCPServers(permissionUser);
       if (!canUseMCP) {
         throw new Error('Forbidden: Insufficient MCP server permissions');
+      }
+      if (!canAccessMCPServer(permissionUser, serverName)) {
+        throw new Error(`Forbidden: MCP server '${serverName}' is not available`);
       }
       const flowsCache = getLogStores(CacheKeys.FLOWS);
       const flowManager = getFlowStateManager(flowsCache);
