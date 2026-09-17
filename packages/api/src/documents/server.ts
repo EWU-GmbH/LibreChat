@@ -168,6 +168,11 @@ const httpServer = http.createServer(async (req, res) => {
   if (await handleDownload(req, res)) {
     return;
   }
+  if (req.url === '/mcp' && req.method === 'GET') {
+    res.writeHead(405, { Allow: 'POST' });
+    res.end();
+    return;
+  }
   if (req.url !== '/mcp' || req.method !== 'POST') {
     sendJson(res, 404, { error: 'Not found' });
     return;

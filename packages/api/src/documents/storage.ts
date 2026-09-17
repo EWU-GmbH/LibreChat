@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const SAFE_FILENAME = /[^a-zA-Z0-9._-]+/g;
+let lastCleanupAt = 0;
 
 export interface StoredDocument {
   filename: string;
@@ -18,8 +20,13 @@ function sanitizeFilename(filename: string): string {
 }
 
 async function removeExpiredFiles(directory: string): Promise<void> {
+  const now = Date.now();
+  if (now - lastCleanupAt < CLEANUP_INTERVAL_MS) {
+    return;
+  }
+  lastCleanupAt = now;
   const entries = await readdir(directory, { withFileTypes: true });
-  const cutoff = Date.now() - MAX_AGE_MS;
+  const cutoff = now - MAX_AGE_MS;
 
   await Promise.all(
     entries
