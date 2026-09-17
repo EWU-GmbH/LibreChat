@@ -181,7 +181,7 @@ describe('document builders', () => {
     const previous = process.env.PDF_SERVICE_URL;
     process.env.PDF_SERVICE_URL = 'https://pdf.example';
     const pdf = Buffer.from('%PDF-1.4 mock');
-    const fetchMock = jest.fn(async () => {
+    const fetchMock = jest.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       return {
         ok: true,
         arrayBuffer: async () => pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength),
@@ -194,8 +194,8 @@ describe('document builders', () => {
         { fetch: fetchMock as unknown as typeof fetch },
       );
       expect(fetchMock).toHaveBeenCalled();
-      expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
       expect(fetchMock.mock.calls[0][0]).toBe('https://pdf.example/generate-pdf');
+      expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
       const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
       expect(body.mainContent).toContain('Hallo');
       expect(body.headerContent).toBeUndefined();

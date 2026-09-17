@@ -1,4 +1,10 @@
-import type { Alignment, ContentBlock, DocumentInput, PreparedImage, ResolvedLayout } from './model';
+import type {
+  Alignment,
+  ContentBlock,
+  DocumentInput,
+  PreparedImage,
+  ResolvedLayout,
+} from './model';
 import { loadBlockImages } from './images';
 import { pageSizeMm, resolveBlocks, resolveLayout } from './model';
 
@@ -55,7 +61,9 @@ function renderBlock(block: ContentBlock, image: PreparedImage | undefined): str
   }
   if (block.type === 'list') {
     const tag = block.ordered ? 'ol' : 'ul';
-    const items = block.items.map((item) => `<li${cssLength(block.style)}>${inlineMarkup(item)}</li>`).join('');
+    const items = block.items
+      .map((item) => `<li${cssLength(block.style)}>${inlineMarkup(item)}</li>`)
+      .join('');
     return `<${tag}>${items}</${tag}>`;
   }
   if (block.type === 'checklist') {
@@ -86,9 +94,7 @@ function renderBlock(block: ContentBlock, image: PreparedImage | undefined): str
       return `<p class="missing-image">[Bild fehlt: ${escapeHtml(block.alt ?? '')}]</p>`;
     }
     const caption = block.caption?.trim() || image.caption;
-    const captionHtml = caption
-      ? `<figcaption>${inlineMarkup(caption)}</figcaption>`
-      : '';
+    const captionHtml = caption ? `<figcaption>${inlineMarkup(caption)}</figcaption>` : '';
     return `<figure class="doc-figure${alignClass(image.align)}"><img src="${image.dataUri}" alt="${escapeHtml(image.alt)}" style="width:${image.widthMm}mm" />${captionHtml}</figure>`;
   }
   if (block.type === 'callout') {
@@ -213,10 +219,10 @@ export async function renderPrintHtml(input: DocumentInput): Promise<string> {
   const blocks = resolveBlocks(input);
   const images = await loadBlockImages(blocks);
   const body = blocks.map((block, index) => renderBlock(block, images.get(index))).join('\n');
-  const title = layout.hideTitle
-    ? ''
-    : `<h1 class="doc-title">${inlineMarkup(input.title)}</h1>`;
-  const subtitle = layout.subtitle ? `<p class="doc-subtitle">${inlineMarkup(layout.subtitle)}</p>` : '';
+  const title = layout.hideTitle ? '' : `<h1 class="doc-title">${inlineMarkup(input.title)}</h1>`;
+  const subtitle = layout.subtitle
+    ? `<p class="doc-subtitle">${inlineMarkup(layout.subtitle)}</p>`
+    : '';
 
   return `<!DOCTYPE html>
 <html lang="de" data-page-size="${layout.pageSize}" data-orientation="${layout.orientation}" data-font="${escapeHtml(layout.defaultFont)}" data-font-size="${layout.defaultFontSize}" data-color="${layout.defaultColor}" data-accent="${layout.accentColor}" data-header="${escapeHtml(layout.header)}" data-footer="${escapeHtml(layout.footer)}" data-title="${escapeHtml(input.title)}" data-margin-top="${layout.marginsMm.top}" data-margin-right="${layout.marginsMm.right}" data-margin-bottom="${layout.marginsMm.bottom}" data-margin-left="${layout.marginsMm.left}">

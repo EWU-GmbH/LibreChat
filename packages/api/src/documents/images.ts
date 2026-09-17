@@ -269,14 +269,7 @@ export async function loadBlockImages(
     }
     images.set(
       index,
-      await loadImageSource(
-        block.src,
-        block.widthMm,
-        block.alt,
-        block.align,
-        deps,
-        block.caption,
-      ),
+      await loadImageSource(block.src, block.widthMm, block.alt, block.align, deps, block.caption),
     );
   }
   return images;

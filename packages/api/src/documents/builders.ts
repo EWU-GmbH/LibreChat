@@ -256,7 +256,11 @@ async function createPdfWithPdfKit(input: DocumentInput): Promise<Buffer> {
         applyPdfStyle(document, layout, block.style);
         for (let itemIndex = 0; itemIndex < block.items.length; itemIndex += 1) {
           const mark = block.checked?.[itemIndex] ? '☑' : '☐';
-          document.text(`${mark} ${block.items[itemIndex]}`, { align: 'left', indent: 8, lineGap: 2 });
+          document.text(`${mark} ${block.items[itemIndex]}`, {
+            align: 'left',
+            indent: 8,
+            lineGap: 2,
+          });
         }
         document.moveDown(0.4);
         continue;

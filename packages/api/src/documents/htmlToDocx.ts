@@ -26,7 +26,11 @@ import { hexForDocx } from './model';
 type CheerioAPI = ReturnType<typeof load>;
 type CheerioEl = ReturnType<CheerioAPI>;
 
-function runsFrom($: CheerioAPI, selection: CheerioEl, extra?: { bold?: boolean; italics?: boolean }): TextRun[] {
+function runsFrom(
+  $: CheerioAPI,
+  selection: CheerioEl,
+  extra?: { bold?: boolean; italics?: boolean },
+): TextRun[] {
   const runs: TextRun[] = [];
   selection.contents().each((_, node) => {
     if (node.type === 'text') {
@@ -51,6 +55,21 @@ function runsFrom($: CheerioAPI, selection: CheerioEl, extra?: { bold?: boolean;
     );
   });
   return runs;
+}
+
+type Alignment = (typeof AlignmentType)[keyof typeof AlignmentType];
+
+function alignmentFrom(selection: CheerioEl): Alignment {
+  if (selection.hasClass('align-center')) {
+    return AlignmentType.CENTER;
+  }
+  if (selection.hasClass('align-right')) {
+    return AlignmentType.RIGHT;
+  }
+  if (selection.hasClass('align-justify')) {
+    return AlignmentType.JUSTIFIED;
+  }
+  return AlignmentType.LEFT;
 }
 
 function parseDataUri(src: string): { data: Buffer; format: 'png' | 'jpg' } | null {
@@ -115,7 +134,14 @@ export async function htmlToDocx(html: string): Promise<Buffer> {
             keepNext: true,
             spacing: { after: isTitle ? 120 : 160 },
             border: isTitle
-              ? { bottom: { color: hexForDocx(accent), space: 1, style: BorderStyle.SINGLE, size: 12 } }
+              ? {
+                  bottom: {
+                    color: hexForDocx(accent),
+                    space: 1,
+                    style: BorderStyle.SINGLE,
+                    size: 12,
+                  },
+                }
               : undefined,
             children: [
               new TextRun({
@@ -150,19 +176,14 @@ export async function htmlToDocx(html: string): Promise<Buffer> {
         return;
       }
       if (tag === 'p') {
+        const runs = runsFrom($, el);
         children.push(
           new Paragraph({
-            alignment: el.hasClass('align-center')
-              ? AlignmentType.CENTER
-              : el.hasClass('align-right')
-                ? AlignmentType.RIGHT
-                : el.hasClass('align-justify')
-                  ? AlignmentType.JUSTIFIED
-                  : AlignmentType.LEFT,
+            alignment: alignmentFrom(el),
             spacing: { after: 160 },
             children:
-              runsFrom($, el).length > 0
-                ? runsFrom($, el)
+              runs.length > 0
+                ? runs
                 : [new TextRun({ text: el.text(), italics: el.hasClass('doc-subtitle'), font })],
           }),
         );
@@ -207,9 +228,7 @@ export async function htmlToDocx(html: string): Promise<Buffer> {
                 borders,
                 verticalAlign: VerticalAlign.CENTER,
                 width: { size: 20, type: WidthType.PERCENTAGE },
-                shading: header
-                  ? { type: ShadingType.CLEAR, fill: hexForDocx(accent) }
-                  : undefined,
+                shading: header ? { type: ShadingType.CLEAR, fill: hexForDocx(accent) } : undefined,
                 margins: { top: 60, bottom: 60, left: 80, right: 80 },
                 children: [
                   new Paragraph({
@@ -226,7 +245,9 @@ export async function htmlToDocx(html: string): Promise<Buffer> {
                 ],
               });
             });
-          rows.push(new TableRow({ children: cells, tableHeader: rowIndex === 0, cantSplit: true }));
+          rows.push(
+            new TableRow({ children: cells, tableHeader: rowIndex === 0, cantSplit: true }),
+          );
         });
         children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));
         return;
@@ -242,7 +263,7 @@ export async function htmlToDocx(html: string): Promise<Buffer> {
         const widthMm = widthMmFromStyle(img.attr('style'));
         children.push(
           new Paragraph({
-            alignment: el.hasClass('align-center') ? AlignmentType.CENTER : AlignmentType.LEFT,
+            alignment: alignmentFrom(el),
             spacing: { before: 120, after: caption ? 40 : 160 },
             children: [
               new ImageRun({
@@ -265,7 +286,9 @@ export async function htmlToDocx(html: string): Promise<Buffer> {
           children.push(
             new Paragraph({
               spacing: { after: 160 },
-              children: [new TextRun({ text: caption, italics: true, size: 18, color: '555555', font })],
+              children: [
+                new TextRun({ text: caption, italics: true, size: 18, color: '555555', font }),
+              ],
             }),
           );
         }
@@ -277,9 +300,17 @@ export async function htmlToDocx(html: string): Promise<Buffer> {
         children.push(
           new Paragraph({
             shading: { type: ShadingType.CLEAR, fill: 'F4F7FB' },
-            border: { left: { color: hexForDocx(accent), space: 8, style: BorderStyle.SINGLE, size: 24 } },
+            border: {
+              left: { color: hexForDocx(accent), space: 8, style: BorderStyle.SINGLE, size: 24 },
+            },
             spacing: { after: 200 },
-            children: [new TextRun({ text: title ? `${title}: ${text}` : text, font, size: Math.round(fontSize * 2) })],
+            children: [
+              new TextRun({
+                text: title ? `${title}: ${text}` : text,
+                font,
+                size: Math.round(fontSize * 2),
+              }),
+            ],
           }),
         );
         return;
@@ -295,7 +326,9 @@ export async function htmlToDocx(html: string): Promise<Buffer> {
       if (tag === 'hr') {
         children.push(
           new Paragraph({
-            border: { bottom: { color: hexForDocx(accent), space: 1, style: BorderStyle.SINGLE, size: 12 } },
+            border: {
+              bottom: { color: hexForDocx(accent), space: 1, style: BorderStyle.SINGLE, size: 12 },
+            },
             spacing: { after: 200 },
             children: [new TextRun('')],
           }),
@@ -334,7 +367,11 @@ export async function htmlToDocx(html: string): Promise<Buffer> {
         headers: {
           default: new Header({
             children: header
-              ? [new Paragraph({ children: [new TextRun({ text: header, size: 18, color: '666666', font })] })]
+              ? [
+                  new Paragraph({
+                    children: [new TextRun({ text: header, size: 18, color: '666666', font })],
+                  }),
+                ]
               : [],
           }),
         },
@@ -344,7 +381,12 @@ export async function htmlToDocx(html: string): Promise<Buffer> {
               new Paragraph({
                 alignment: AlignmentType.RIGHT,
                 children: [
-                  new TextRun({ text: footer ? `${footer}  ` : '', size: 18, color: '666666', font }),
+                  new TextRun({
+                    text: footer ? `${footer}  ` : '',
+                    size: 18,
+                    color: '666666',
+                    font,
+                  }),
                   new TextRun({ children: [PageNumber.CURRENT], size: 18, color: '666666', font }),
                 ],
               }),
