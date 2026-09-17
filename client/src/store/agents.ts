@@ -1,7 +1,7 @@
-import { Constants } from 'librechat-data-provider';
+import { Constants, LocalStorageKeys } from 'librechat-data-provider';
 import { atomFamily, useRecoilCallback } from 'recoil';
 import type { TEphemeralAgent } from 'librechat-data-provider';
-import { logger } from '~/utils';
+import { logger, removeTimestampedValue } from '~/utils';
 
 export const ephemeralAgentByConvoId = atomFamily<TEphemeralAgent | null, string>({
   key: 'ephemeralAgentByConvoId',
@@ -59,6 +59,17 @@ export function useApplyNewAgentTemplate() {
             logger.log('agents', `Applying agent template to "${targetId}":`, agentTemplate);
             // 3. Set the state for the target conversation ID using the template value
             set(ephemeralAgentByConvoId(targetId), agentTemplate);
+            if (sourceId === Constants.NEW_CONVO && targetId !== sourceId) {
+              const nextChatTemplate = { ...agentTemplate };
+              delete nextChatTemplate.pii_protection;
+              set(
+                ephemeralAgentByConvoId(sourceId),
+                Object.keys(nextChatTemplate).length > 0 ? nextChatTemplate : null,
+              );
+              removeTimestampedValue(
+                `${LocalStorageKeys.LAST_PII_PROTECTION_TOGGLE_}${Constants.NEW_CONVO}`,
+              );
+            }
           } else {
             // 4. Handle the case where the "new" template has no agent state (is null)
             logger.warn(
