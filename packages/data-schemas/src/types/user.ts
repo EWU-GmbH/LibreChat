@@ -1,4 +1,4 @@
-import type { RefillIntervalUnit, TUserFavorite } from 'librechat-data-provider';
+import type { RefillIntervalUnit, TUserFavorite, UserMCPAccess } from 'librechat-data-provider';
 import type { Document, Types } from 'mongoose';
 import { CursorPaginationParams } from '~/common';
 
@@ -20,6 +20,11 @@ export interface IUser extends Document {
   avatar?: string;
   provider: string;
   role?: string;
+  blocked?: boolean;
+  blockedAt?: Date;
+  blockedBy?: Types.ObjectId;
+  lastLoginAt?: Date;
+  mcpAccess?: UserMCPAccess;
   googleId?: string;
   facebookId?: string;
   openidId?: string;
@@ -88,6 +93,11 @@ export interface UpdateUserRequest {
   username?: string;
   email?: string;
   role?: string;
+  blocked?: boolean;
+  blockedAt?: Date;
+  blockedBy?: Types.ObjectId;
+  lastLoginAt?: Date;
+  mcpAccess?: UserMCPAccess;
   emailVerified?: boolean;
   avatar?: string;
   plugins?: string[];

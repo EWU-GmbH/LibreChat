@@ -1,14 +1,21 @@
 import { Types } from 'mongoose';
 import { logger, hashToken, getRandomValues } from '@librechat/data-schemas';
+import type { UserMCPAccess } from 'librechat-data-provider';
+
+export interface InviteMetadata {
+  mcpAccess?: UserMCPAccess;
+}
 
 export interface InviteDeps {
   createToken: (data: {
     userId: Types.ObjectId;
     email: string;
+    type: 'invite';
     token: string;
     createdAt: number;
     expiresIn: number;
-  }) => Promise<unknown>;
+    metadata?: InviteMetadata;
+  }) => Promise<object>;
   findToken: (filter: { token: string; email: string }) => Promise<unknown>;
 }
 
@@ -16,6 +23,7 @@ export interface InviteDeps {
 export async function createInvite(
   email: string,
   deps: InviteDeps,
+  options: { expiresIn?: number; metadata?: InviteMetadata } = {},
 ): Promise<string | { message: string }> {
   try {
     const token = await getRandomValues(32);
@@ -26,9 +34,11 @@ export async function createInvite(
     await deps.createToken({
       userId: fakeUserId,
       email,
+      type: 'invite',
       token: hash,
       createdAt: Date.now(),
-      expiresIn: 604800,
+      expiresIn: options.expiresIn ?? 604800,
+      metadata: options.metadata,
     });
 
     return encodedToken;

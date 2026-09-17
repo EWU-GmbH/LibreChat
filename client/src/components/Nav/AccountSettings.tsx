@@ -1,7 +1,9 @@
 import { useState, memo, useRef } from 'react';
 import { useSetRecoilState } from 'recoil';
+import { useNavigate } from 'react-router-dom';
 import * as Menu from '@ariakit/react/menu';
 import { GearIcon, DropdownMenuSeparator, Avatar } from '@librechat/client';
+import { SystemRoles } from 'librechat-data-provider';
 import {
   Archive,
   ChevronRight,
@@ -12,6 +14,7 @@ import {
   LogOut,
   Scale,
   ShieldCheck,
+  Users,
 } from 'lucide-react';
 import { ArchivedChatsModal } from '~/components/Nav/SettingsTabs/General/ArchivedChatsModal';
 import { MyFilesModal } from '~/components/Chat/Input/Files/MyFilesModal';
@@ -104,6 +107,7 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
   const setShowShortcutsDialog = useSetRecoilState(store.showShortcutsDialog);
   const [showArchived, setShowArchived] = useState(false);
   const accountSettingsButtonRef = useRef<HTMLButtonElement>(null);
+  const navigate = useNavigate();
 
   return (
     <Menu.MenuProvider placement={collapsed ? 'right-end' : undefined}>
@@ -168,6 +172,16 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
           <Archive className="icon-md" aria-hidden="true" />
           {localize('com_nav_archived_chats')}
         </Menu.MenuItem>
+        {user?.role === SystemRoles.ADMIN && (
+          <Menu.MenuItem
+            onClick={() => navigate('/admin/users')}
+            className="select-item text-sm"
+            data-testid="nav-admin-users"
+          >
+            <Users className="icon-md" aria-hidden="true" />
+            {localize('com_admin_users_nav')}
+          </Menu.MenuItem>
+        )}
         <Menu.MenuItem
           onClick={() => setShowSettings(true)}
           className="select-item text-sm"

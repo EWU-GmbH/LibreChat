@@ -86,6 +86,8 @@ export enum QueryKeys {
   skillStates = 'skillStates',
   /* General user favorites */
   favorites = 'favorites',
+  adminUsers = 'adminUsers',
+  adminMCPServers = 'adminMCPServers',
 }
 
 // Dynamic query keys that require parameters
@@ -129,4 +131,7 @@ export enum MutationKeys {
   deleteSkillNode = 'deleteSkillNode',
   updateSkillNodeContent = 'updateSkillNodeContent',
   convoPin = 'convoPin',
+  inviteAdminUser = 'inviteAdminUser',
+  updateAdminUserStatus = 'updateAdminUserStatus',
+  updateAdminUserMCPAccess = 'updateAdminUserMCPAccess',
 }

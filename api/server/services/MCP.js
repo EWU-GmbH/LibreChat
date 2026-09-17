@@ -21,6 +21,7 @@ const {
   checkAccessWithRequestCache,
   requiresEphemeralUserConnection,
   containsGraphTokenPlaceholder,
+  filterMCPServersForUser,
 } = require('@librechat/api');
 const {
   Time,
@@ -121,7 +122,8 @@ async function resolveConfigServers(req) {
   try {
     const registry = getMCPServersRegistry();
     const appConfig = await getAppConfigForRequest(req);
-    return await registry.ensureConfigServers(appConfig?.mcpConfig || {});
+    const servers = await registry.ensureConfigServers(appConfig?.mcpConfig || {});
+    return filterMCPServersForUser(servers, req?.user);
   } catch (error) {
     logger.warn(
       '[resolveConfigServers] Failed to resolve config servers, degrading to empty:',
@@ -162,11 +164,10 @@ async function resolveAllMcpConfigs(userId, user) {
       error,
     );
   }
-  if (user?.role) {
-    return await registry.getAllServerConfigs(userId, configServers, user.role);
-  }
-
-  return await registry.getAllServerConfigs(userId, configServers);
+  const servers = user?.role
+    ? await registry.getAllServerConfigs(userId, configServers, user.role)
+    : await registry.getAllServerConfigs(userId, configServers);
+  return filterMCPServersForUser(servers, user);
 }
 
 function getServerCustomUserVars(userMCPAuthMap, serverName) {

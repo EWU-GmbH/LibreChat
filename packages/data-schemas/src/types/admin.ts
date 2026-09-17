@@ -91,13 +91,26 @@ export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
  * action maps unambiguously to a category. The Mongoose schema enum and the
  * HTTP handler's whitelist both consume this constant so they cannot drift.
  */
-export const AUDIT_ACTIONS = ['grant.assigned', 'grant.removed'] as const;
+export const AUDIT_ACTIONS = [
+  'grant.assigned',
+  'grant.removed',
+  'auth.user_invited',
+  'auth.invite_revoked',
+  'auth.user_blocked',
+  'auth.user_unblocked',
+  'mcp.user_access_updated',
+] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 /** Maps each action to its category so writers never pass both. */
 export const AUDIT_ACTION_CATEGORY: Record<AuditAction, AuditCategory> = {
   'grant.assigned': 'grant',
   'grant.removed': 'grant',
+  'auth.user_invited': 'auth',
+  'auth.invite_revoked': 'auth',
+  'auth.user_blocked': 'auth',
+  'auth.user_unblocked': 'auth',
+  'mcp.user_access_updated': 'mcp',
 };
 
 /** Result of the audited operation. Kept first-class instead of being encoded

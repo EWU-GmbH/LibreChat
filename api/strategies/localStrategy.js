@@ -36,6 +36,13 @@ async function passportLogin(req, email, password, done) {
       return done(null, false, { message: 'Email does not exist.' });
     }
 
+    if (user.blocked === true) {
+      logger.warn(
+        `[Login] Blocked user attempted login [Username: ${email}] [Request-IP: ${req.ip}]`,
+      );
+      return done(null, false, { message: 'This account has been blocked.' });
+    }
+
     const isMatch = await comparePassword(user, password, { compare: bcrypt.compare });
     if (!isMatch) {
       logError('Passport Local Strategy - Password does not match', { isMatch });

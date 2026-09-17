@@ -14,6 +14,10 @@ const jwtLogin = () =>
       try {
         const user = await getUserById(payload?.id, '-password -__v -totpSecret -backupCodes');
         if (user) {
+          if (user.blocked === true) {
+            logger.warn('[jwtLogin] Blocked user attempted authenticated request: ' + payload?.id);
+            return done(null, false);
+          }
           user.id = user._id.toString();
           if (!user.role) {
             user.role = SystemRoles.USER;

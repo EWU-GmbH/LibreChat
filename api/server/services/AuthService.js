@@ -651,6 +651,11 @@ const setCloudFrontAuthCookies = (req, res, user, options = {}) => {
  */
 const setAuthTokens = async (userId, res, _session = null, req = null) => {
   try {
+    const user = await getUserById(userId);
+    if (!user || user.blocked === true) {
+      throw new Error('This account has been blocked.');
+    }
+
     let session = _session;
     let refreshToken;
     let refreshTokenExpires;
@@ -666,9 +671,9 @@ const setAuthTokens = async (userId, res, _session = null, req = null) => {
       refreshTokenExpires = session.expiration.getTime();
     }
 
-    const user = await getUserById(userId);
     const sessionExpiry = math(process.env.SESSION_EXPIRY, DEFAULT_SESSION_EXPIRY);
     const token = await generateToken(user, sessionExpiry);
+    await updateUser(userId, { lastLoginAt: new Date() });
 
     res.cookie('refreshToken', refreshToken, {
       expires: new Date(refreshTokenExpires),

@@ -16,6 +16,49 @@ import request from './request';
 import * as s from './schemas';
 import * as r from './roles';
 
+export function getAdminUsers(params: t.AdminUsersParams): Promise<t.AdminUsersPage> {
+  const query = new URLSearchParams();
+  if (params.cursor) {
+    query.set('cursor', params.cursor);
+  }
+  if (params.limit) {
+    query.set('limit', String(params.limit));
+  }
+  if (params.search) {
+    query.set('search', params.search);
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return request.get(`${endpoints.adminUsers()}${suffix}`);
+}
+
+export function getAdminMCPServers(): Promise<t.AdminMCPServersResponse> {
+  return request.get(endpoints.adminUserMCPServers());
+}
+
+export function inviteAdminUser(
+  payload: t.AdminInviteUserRequest,
+): Promise<t.AdminInviteUserResponse> {
+  return request.post(endpoints.adminUserInvites(), payload);
+}
+
+export function revokeAdminUserInvite(email: string): Promise<{ success: boolean }> {
+  return request.delete(endpoints.adminUserInvite(email));
+}
+
+export function updateAdminUserStatus(
+  userId: string,
+  payload: t.AdminUpdateUserStatusRequest,
+): Promise<{ user: t.AdminUser }> {
+  return request.patch(endpoints.adminUserStatus(userId), payload);
+}
+
+export function updateAdminUserMCPAccess(
+  userId: string,
+  payload: t.AdminUpdateMCPAccessRequest,
+): Promise<{ user: t.AdminUser }> {
+  return request.put(endpoints.adminUserMCPAccess(userId), payload);
+}
+
 export function revokeUserKey(name: string): Promise<unknown> {
   return request.delete(endpoints.revokeUserKey(name));
 }
