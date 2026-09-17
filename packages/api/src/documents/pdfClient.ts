@@ -8,47 +8,18 @@ const defaultDeps: PdfServiceDeps = {
   fetch: globalThis.fetch.bind(globalThis),
 };
 
+const DEFAULT_RENDER_PATH = '/generate-pdf';
+
 function pdfServiceEndpoint(): string | null {
-  const url = process.env.PDF_SERVICE_URL?.trim();
-  if (!url) {
+  const configured = process.env.PDF_SERVICE_URL?.trim();
+  if (!configured) {
     return null;
   }
-  const path = process.env.PDF_SERVICE_PATH?.trim();
-  if (!path) {
-    return url;
+  const url = new URL(configured);
+  if (url.pathname === '/' || url.pathname === '') {
+    url.pathname = DEFAULT_RENDER_PATH;
   }
-  return new URL(path, url.endsWith('/') ? url : `${url}/`).toString();
-}
-
-function isPdfBuffer(data: Buffer): boolean {
-  return data.subarray(0, 5).toString() === '%PDF-';
-}
-
-function decodeBase64Pdf(value: string): Buffer | null {
-  try {
-    const data = Buffer.from(value, 'base64');
-    return isPdfBuffer(data) ? data : null;
-  } catch {
-    return null;
-  }
-}
-
-function pdfFromJson(body: string): Buffer | null {
-  try {
-    const parsed = JSON.parse(body) as Record<string, unknown>;
-    const candidates = [parsed.pdf, parsed.data, parsed.file, parsed.base64, parsed.content];
-    for (const candidate of candidates) {
-      if (typeof candidate === 'string') {
-        const pdf = decodeBase64Pdf(candidate);
-        if (pdf) {
-          return pdf;
-        }
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
+  return url.toString();
 }
 
 export async function renderPdfViaService(
@@ -74,26 +45,30 @@ export async function renderPdfViaService(
       method: 'POST',
       headers,
       signal: controller.signal,
+      /** Header, footer and page numbers come from the `@page` margin boxes in the HTML;
+       * sending templates as well makes Chromium print both. */
       body: JSON.stringify({
-        html,
-        paperSize: layout.pageSize.toLowerCase(),
-        format: layout.pageSize,
-        orientation: layout.orientation,
-        landscape: layout.orientation === 'landscape',
+        mainContent: html,
+        options: {
+          format: layout.pageSize,
+          landscape: layout.orientation === 'landscape',
+          margins: {
+            top: `${layout.marginsMm.top}mm`,
+            right: `${layout.marginsMm.right}mm`,
+            bottom: `${layout.marginsMm.bottom}mm`,
+            left: `${layout.marginsMm.left}mm`,
+          },
+        },
       }),
     });
     const bytes = Buffer.from(await response.arrayBuffer());
     if (!response.ok) {
       throw new Error(`PDF-Dienst antwortete mit HTTP ${response.status}`);
     }
-    if (isPdfBuffer(bytes)) {
-      return bytes;
+    if (bytes.subarray(0, 5).toString() !== '%PDF-') {
+      throw new Error('PDF-Dienst lieferte keine PDF-Datei');
     }
-    const fromJson = pdfFromJson(bytes.toString('utf8'));
-    if (fromJson) {
-      return fromJson;
-    }
-    throw new Error('PDF-Dienst lieferte keine PDF-Datei');
+    return bytes;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error('Zeitüberschreitung beim PDF-Dienst');

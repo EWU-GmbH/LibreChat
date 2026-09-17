@@ -62,7 +62,7 @@ function renderBlock(block: ContentBlock, image: PreparedImage | undefined): str
     const items = block.items
       .map((item, index) => {
         const done = block.checked?.[index] === true;
-        return `<li class="${done ? 'is-checked' : ''}"><span class="box" aria-hidden="true">${done ? '☑' : '☐'}</span> ${inlineMarkup(item)}</li>`;
+        return `<li class="${done ? 'is-checked' : ''}"><span class="box" aria-hidden="true"></span>${inlineMarkup(item)}</li>`;
       })
       .join('');
     return `<ul class="checklist">${items}</ul>`;
@@ -150,7 +150,29 @@ p { margin: 0 0 8pt; }
 ul, ol { margin: 0 0 10pt; padding-left: 18pt; }
 li { margin: 0 0 3pt; }
 .checklist { list-style: none; padding-left: 4pt; }
-.checklist .box { font-family: "Segoe UI Symbol", sans-serif; margin-right: 6pt; }
+.checklist li { padding-left: 16pt; text-indent: -16pt; }
+.checklist .box {
+  display: inline-block;
+  position: relative;
+  width: 9pt;
+  height: 9pt;
+  margin-right: 7pt;
+  border: 1pt solid ${layout.accentColor};
+  border-radius: 1.5pt;
+  text-indent: 0;
+  vertical-align: -1pt;
+}
+.checklist .is-checked .box::after {
+  content: "";
+  position: absolute;
+  left: 2.6pt;
+  top: 0.2pt;
+  width: 2.6pt;
+  height: 5.6pt;
+  border: solid ${layout.accentColor};
+  border-width: 0 1.6pt 1.6pt 0;
+  transform: rotate(45deg);
+}
 table {
   width: 100%;
   border-collapse: collapse;

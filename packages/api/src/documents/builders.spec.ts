@@ -179,7 +179,7 @@ describe('document builders', () => {
 
   it('uses the PDF service when PDF_SERVICE_URL is set', async () => {
     const previous = process.env.PDF_SERVICE_URL;
-    process.env.PDF_SERVICE_URL = 'https://pdf.example/render';
+    process.env.PDF_SERVICE_URL = 'https://pdf.example';
     const pdf = Buffer.from('%PDF-1.4 mock');
     const fetchMock = jest.fn(async () => {
       return {
@@ -195,8 +195,11 @@ describe('document builders', () => {
       );
       expect(fetchMock).toHaveBeenCalled();
       expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
+      expect(fetchMock.mock.calls[0][0]).toBe('https://pdf.example/generate-pdf');
       const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-      expect(body.html).toContain('Hallo');
+      expect(body.mainContent).toContain('Hallo');
+      expect(body.headerContent).toBeUndefined();
+      expect(body.options).toMatchObject({ format: 'A4', landscape: false });
     } finally {
       if (previous === undefined) {
         delete process.env.PDF_SERVICE_URL;
