@@ -5,14 +5,15 @@ import { timingSafeEqual } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { createDocx, createPdf, createXlsx, type SheetInput } from './builders';
+import type { ContentBlock, DocumentInput, DocumentLayout, SheetInput } from './model';
+import { createDocx, createPdf, createXlsx } from './builders';
 import { resolveDocumentPath, storeDocument } from './storage';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const STORAGE_DIRECTORY = process.env.DOCUMENT_STORAGE_PATH ?? '/data';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL ?? `http://localhost:${PORT}`;
 const AUTH_TOKEN = process.env.MCP_SERVER_AUTH_TOKEN ?? '';
-const MAX_REQUEST_BYTES = 1024 * 1024;
+const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -20,7 +21,90 @@ const cellValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()])
 const sheetSchema = z.object({
   name: z.string().min(1).max(31),
   rows: z.array(z.array(cellValueSchema).max(100)).min(1).max(5000),
+  headerFill: z.string().max(9).optional(),
+  headerColor: z.string().max(9).optional(),
 });
+
+const alignmentSchema = z.enum(['left', 'center', 'right', 'justify']);
+const textStyleSchema = z.object({
+  font: z.string().min(1).max(60).optional(),
+  size: z.number().min(6).max(48).optional(),
+  color: z.string().max(9).optional(),
+  bold: z.boolean().optional(),
+  italic: z.boolean().optional(),
+  underline: z.boolean().optional(),
+});
+
+const layoutSchema = z.object({
+  pageSize: z.enum(['A4', 'Letter']).optional(),
+  orientation: z.enum(['portrait', 'landscape']).optional(),
+  marginsMm: z
+    .object({
+      top: z.number().min(0).max(80).optional(),
+      right: z.number().min(0).max(80).optional(),
+      bottom: z.number().min(0).max(80).optional(),
+      left: z.number().min(0).max(80).optional(),
+    })
+    .optional(),
+  header: z.string().max(200).optional(),
+  footer: z.string().max(200).optional(),
+  backgroundColor: z.string().max(9).optional(),
+  defaultFont: z.string().min(1).max(60).optional(),
+  defaultFontSize: z.number().min(6).max(36).optional(),
+  defaultColor: z.string().max(9).optional(),
+  accentColor: z.string().max(9).optional(),
+  hideTitle: z.boolean().optional(),
+});
+
+const blockSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('heading'),
+    level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    text: z.string().min(1).max(2000),
+    align: alignmentSchema.optional(),
+    style: textStyleSchema.optional(),
+  }),
+  z.object({
+    type: z.literal('paragraph'),
+    text: z.string().min(1).max(20_000),
+    align: alignmentSchema.optional(),
+    style: textStyleSchema.optional(),
+  }),
+  z.object({
+    type: z.literal('list'),
+    items: z.array(z.string().min(1).max(2000)).min(1).max(100),
+    ordered: z.boolean().optional(),
+    style: textStyleSchema.optional(),
+  }),
+  z.object({
+    type: z.literal('table'),
+    headers: z.array(z.string().max(500)).max(20).optional(),
+    rows: z
+      .array(z.array(z.string().max(2000)).min(1).max(20))
+      .min(1)
+      .max(100),
+  }),
+  z.object({
+    type: z.literal('image'),
+    src: z.string().min(1).max(2_000_000),
+    alt: z.string().max(200).optional(),
+    widthMm: z.number().min(10).max(190).optional(),
+    align: alignmentSchema.optional(),
+  }),
+  z.object({
+    type: z.literal('spacer'),
+    heightMm: z.number().min(1).max(40).optional(),
+  }),
+  z.object({ type: z.literal('rule') }),
+]);
+
+const documentArgs = {
+  filename: z.string().min(1).max(120),
+  title: z.string().min(1).max(200),
+  content: z.string().max(500_000).optional(),
+  layout: layoutSchema.optional(),
+  blocks: z.array(blockSchema).min(1).max(400).optional(),
+};
 
 function ensureExtension(filename: string, extension: string): string {
   return filename.toLowerCase().endsWith(extension) ? filename : `${filename}${extension}`;
@@ -35,6 +119,10 @@ function authorized(req: IncomingMessage): boolean {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+function hasDocumentBody(content: string | undefined, blocks: ContentBlock[] | undefined): boolean {
+  return Boolean((content && content.trim()) || (blocks && blocks.length > 0));
+}
+
 async function readJsonBody(req: IncomingMessage): Promise<JsonValue> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -42,7 +130,7 @@ async function readJsonBody(req: IncomingMessage): Promise<JsonValue> {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
     if (size > MAX_REQUEST_BYTES) {
-      throw new Error('Request body exceeds 1 MB');
+      throw new Error('Request body exceeds 8 MB');
     }
     chunks.push(buffer);
   }
@@ -60,64 +148,74 @@ function documentResult(filename: string, url: string, bytes: number) {
   };
 }
 
+async function storeGeneratedFile(filename: string, extension: string, data: Buffer) {
+  return storeDocument(
+    STORAGE_DIRECTORY,
+    PUBLIC_BASE_URL,
+    ensureExtension(filename, extension),
+    data,
+  );
+}
+
+const toolGuide =
+  ' Übersetze Layout- und Designwünsche aus dem Chat in `layout` und `blocks` ' +
+  '(Überschriften, Absätze, Listen, Tabellen, Linien, Abstände, Bilder). ' +
+  'Bilder als öffentliche https-URL oder data-URI (PNG/JPEG, max. 2 MB, max. 12 Stück). ' +
+  'Markdown in `content` bleibt möglich, inklusive ![alt](url).';
+
 function createMcpServer(): McpServer {
-  const server = new McpServer({ name: 'ewu-documents', version: '1.0.0' });
+  const server = new McpServer({ name: 'ewu-documents', version: '1.1.0' });
 
   server.tool(
     'create_docx',
-    'Erstellt eine herunterladbare Word-Datei aus strukturiertem Markdown-Text.',
-    {
-      filename: z.string().min(1).max(120),
-      title: z.string().min(1).max(200),
-      content: z.string().min(1).max(500_000),
-    },
-    async ({ filename, title, content }) => {
-      const data = await createDocx(title, content);
-      const stored = await storeDocument(
-        STORAGE_DIRECTORY,
-        PUBLIC_BASE_URL,
-        ensureExtension(filename, '.docx'),
-        data,
-      );
+    `Erstellt eine herunterladbare Word-Datei.${toolGuide}`,
+    documentArgs,
+    async ({ filename, title, content, layout, blocks }) => {
+      if (!hasDocumentBody(content, blocks as ContentBlock[] | undefined)) {
+        throw new Error('content oder blocks ist erforderlich');
+      }
+      const input: DocumentInput = {
+        title,
+        content,
+        layout: layout as DocumentLayout | undefined,
+        blocks: blocks as ContentBlock[] | undefined,
+      };
+      const data = await createDocx(input);
+      const stored = await storeGeneratedFile(filename, '.docx', data);
       return documentResult(stored.filename, stored.url, data.length);
     },
   );
 
   server.tool(
     'create_xlsx',
-    'Erstellt eine herunterladbare Excel-Arbeitsmappe mit bis zu 20 Tabellenblättern.',
+    'Erstellt eine herunterladbare Excel-Arbeitsmappe mit bis zu 20 Tabellenblättern. Optional headerFill/headerColor für die Kopfzeile.',
     {
       filename: z.string().min(1).max(120),
       sheets: z.array(sheetSchema).min(1).max(20),
     },
     async ({ filename, sheets }) => {
       const data = await createXlsx(sheets as SheetInput[]);
-      const stored = await storeDocument(
-        STORAGE_DIRECTORY,
-        PUBLIC_BASE_URL,
-        ensureExtension(filename, '.xlsx'),
-        data,
-      );
+      const stored = await storeGeneratedFile(filename, '.xlsx', data);
       return documentResult(stored.filename, stored.url, data.length);
     },
   );
 
   server.tool(
     'create_pdf',
-    'Erstellt eine herunterladbare PDF-Datei aus einem Titel und Fließtext.',
-    {
-      filename: z.string().min(1).max(120),
-      title: z.string().min(1).max(200),
-      content: z.string().min(1).max(500_000),
-    },
-    async ({ filename, title, content }) => {
-      const data = await createPdf(title, content);
-      const stored = await storeDocument(
-        STORAGE_DIRECTORY,
-        PUBLIC_BASE_URL,
-        ensureExtension(filename, '.pdf'),
-        data,
-      );
+    `Erstellt eine herunterladbare PDF-Datei.${toolGuide}`,
+    documentArgs,
+    async ({ filename, title, content, layout, blocks }) => {
+      if (!hasDocumentBody(content, blocks as ContentBlock[] | undefined)) {
+        throw new Error('content oder blocks ist erforderlich');
+      }
+      const input: DocumentInput = {
+        title,
+        content,
+        layout: layout as DocumentLayout | undefined,
+        blocks: blocks as ContentBlock[] | undefined,
+      };
+      const data = await createPdf(input);
+      const stored = await storeGeneratedFile(filename, '.pdf', data);
       return documentResult(stored.filename, stored.url, data.length);
     },
   );
