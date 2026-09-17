@@ -1,6 +1,5 @@
 // Mock all dependencies - define mocks before imports
 const mockGetTenantId = jest.fn();
-const mockGetDownloadStream = jest.fn();
 
 jest.mock('@librechat/data-schemas', () => ({
   logger: {
@@ -78,13 +77,6 @@ jest.mock('~/models', () => ({
   updateToken: jest.fn(),
   deleteTokens: jest.fn(),
   getRoleByName: jest.fn(),
-  getFiles: jest.fn(),
-}));
-
-jest.mock('./Files/strategies', () => ({
-  getStrategyFunctions: jest.fn(() => ({
-    getDownloadStream: mockGetDownloadStream,
-  })),
 }));
 
 jest.mock('./Tools/mcp', () => ({
@@ -1254,14 +1246,9 @@ describe('User parameter passing tests', () => {
       );
     });
 
-    it('resolves the latest user-owned Flux image before calling the documents MCP', async () => {
-      const { Readable } = require('node:stream');
+    it('forwards image-resolved arguments from the injected resolver', async () => {
       const mockUser = { id: 'flux-user', role: 'USER' };
-      const mockReq = {
-        config: { paths: { imageOutput: '/images' } },
-        user: mockUser,
-      };
-      const { getFiles, getRoleByName } = require('~/models');
+      const { getRoleByName } = require('~/models');
       getRoleByName.mockResolvedValue({
         permissions: {
           [PermissionTypes.MCP_SERVERS]: {
@@ -1269,23 +1256,16 @@ describe('User parameter passing tests', () => {
           },
         },
       });
-      getFiles.mockResolvedValue([
-        {
-          user: mockUser.id,
-          file_id: 'file_flux_123',
-          filepath: '/images/flux-user/image.png',
-          type: 'image/png',
-          source: 'local',
-          context: 'image_generation',
-          bytes: 4,
-        },
-      ]);
-      mockGetDownloadStream.mockResolvedValue(Readable.from([Buffer.from('flux')]));
 
+      const resolveToolImages = jest.fn(async ({ toolArguments }) => ({
+        ...toolArguments,
+        blocks: [{ type: 'image', src: 'data:image/png;base64,Zmx1eA==' }],
+      }));
       const mockCallTool = jest.fn().mockResolvedValue(['ok', null]);
       mockGetMCPManager.mockReturnValue({ callTool: mockCallTool });
+
       const mcpTool = await createMCPTool({
-        req: mockReq,
+        resolveToolImages,
         user: mockUser,
         toolKey: `create_docx${D}documents`,
         provider: 'openai',
@@ -1303,7 +1283,7 @@ describe('User parameter passing tests', () => {
         mcpTool.invoke(
           {
             title: 'Flux-Bericht',
-            blocks: [{ type: 'image', src: 'lc-file:latest', alt: 'Flux' }],
+            blocks: [{ type: 'image', src: 'lc-file:latest' }],
           },
           {
             configurable: { user: mockUser },
@@ -1317,33 +1297,26 @@ describe('User parameter passing tests', () => {
         ),
       ).resolves.toBe('ok');
 
-      expect(getFiles).toHaveBeenCalledWith(
-        {
-          user: mockUser.id,
-          type: { $in: ['image/png', 'image/jpeg', 'image/jpg'] },
-          context: 'image_generation',
-        },
-        { createdAt: -1 },
+      expect(resolveToolImages).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serverName: 'documents',
+          toolName: 'create_docx',
+          user: mockUser,
+        }),
       );
       expect(mockCallTool).toHaveBeenCalledWith(
         expect.objectContaining({
-          toolArguments: expect.objectContaining({
-            blocks: [
-              {
-                type: 'image',
-                src: `data:image/png;base64,${Buffer.from('flux').toString('base64')}`,
-                alt: 'Flux',
-              },
-            ],
-          }),
+          toolArguments: {
+            title: 'Flux-Bericht',
+            blocks: [{ type: 'image', src: 'data:image/png;base64,Zmx1eA==' }],
+          },
         }),
       );
     });
 
-    it('does not forward a LibreChat image reference when ownership lookup fails', async () => {
+    it('does not call the MCP server when image resolution fails', async () => {
       const mockUser = { id: 'owner', role: 'USER' };
-      const mockReq = { config: {}, user: mockUser };
-      const { getFiles, getRoleByName } = require('~/models');
+      const { getRoleByName } = require('~/models');
       getRoleByName.mockResolvedValue({
         permissions: {
           [PermissionTypes.MCP_SERVERS]: {
@@ -1351,12 +1324,13 @@ describe('User parameter passing tests', () => {
           },
         },
       });
-      getFiles.mockResolvedValue([]);
 
       const mockCallTool = jest.fn();
       mockGetMCPManager.mockReturnValue({ callTool: mockCallTool });
       const mcpTool = await createMCPTool({
-        req: mockReq,
+        resolveToolImages: async () => {
+          throw new Error('LibreChat image not found or access denied');
+        },
         user: mockUser,
         toolKey: `create_pdf${D}documents`,
         provider: 'openai',

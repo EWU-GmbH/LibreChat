@@ -38,10 +38,9 @@ function getReference(value: string | undefined): DocumentImageReference | null 
 }
 
 export function hasDocumentImageReferences(toolArguments: object | string): boolean {
-  if (typeof toolArguments === 'string') {
-    return toolArguments.includes(LIBRECHAT_IMAGE_PREFIX);
-  }
-  return JSON.stringify(toolArguments).includes(LIBRECHAT_IMAGE_PREFIX);
+  const serialized =
+    typeof toolArguments === 'string' ? toolArguments : JSON.stringify(toolArguments);
+  return serialized.includes(LIBRECHAT_IMAGE_PREFIX) || serialized.includes('"fileId"');
 }
 
 export async function resolveDocumentImageReferences(

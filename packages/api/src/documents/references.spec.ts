@@ -47,6 +47,13 @@ describe('document image references', () => {
     });
   });
 
+  it('detects references from either the prefix or a fileId field', () => {
+    expect(hasDocumentImageReferences({ blocks: [{ type: 'image', fileId: 'file_1' }] })).toBe(
+      true,
+    );
+    expect(hasDocumentImageReferences('{"content":"![x](lc-file:latest)"}')).toBe(true);
+  });
+
   it('leaves ordinary document arguments unchanged', async () => {
     const input = { content: '![Logo](https://example.com/logo.png)' };
     const resolver = jest.fn();

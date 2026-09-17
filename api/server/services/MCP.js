@@ -23,14 +23,11 @@ const {
   containsGraphTokenPlaceholder,
   filterMCPServersForUser,
   canAccessMCPServer,
-  resolveDocumentImageReferences,
 } = require('@librechat/api');
 const {
   Time,
   CacheKeys,
   Constants,
-  FileSources,
-  FileContext,
   Permissions,
   PermissionTypes,
   isAssistantsEndpoint,
@@ -48,7 +45,6 @@ const { exchangeOboToken } = require('./OboTokenService');
 const { createOboTrustChecker } = require('./OboPolicyService');
 const { reinitMCPServer } = require('./Tools/mcp');
 const { getAppConfig } = require('./Config');
-const { getStrategyFunctions } = require('./Files/strategies');
 const { getLogStores } = require('~/cache');
 
 const MAX_CACHE_SIZE = 1000;
@@ -57,72 +53,6 @@ const RECONNECT_THROTTLE_MS = 10_000;
 
 const missingToolCache = new Map();
 const MISSING_TOOL_TTL_MS = 10_000;
-const MAX_DOCUMENT_IMAGE_BYTES = 2 * 1024 * 1024;
-const DOCUMENT_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
-const DOCUMENT_TOOLS = new Set(['create_docx', 'create_pdf']);
-
-async function streamToLimitedBuffer(stream, maxBytes) {
-  const chunks = [];
-  let bytes = 0;
-  for await (const chunk of stream) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    bytes += buffer.length;
-    if (bytes > maxBytes) {
-      stream.destroy?.();
-      throw new Error('Document image exceeds 2 MB');
-    }
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks);
-}
-
-async function resolveLibreChatDocumentImage({ fileId, req, user }) {
-  if (!req?.config || !user?.id) {
-    throw new Error('LibreChat image references require an authenticated request');
-  }
-
-  const filter = {
-    user: user.id,
-    type: { $in: DOCUMENT_IMAGE_TYPES },
-  };
-  if (fileId === 'latest') {
-    filter.context = FileContext.image_generation;
-  } else {
-    filter.file_id = fileId;
-  }
-
-  const files = await db.getFiles(filter, { createdAt: -1 });
-  const file = files?.[0];
-  if (!file) {
-    throw new Error(
-      fileId === 'latest'
-        ? 'No generated image found for this user'
-        : 'LibreChat image not found or access denied',
-    );
-  }
-  if (file.bytes > MAX_DOCUMENT_IMAGE_BYTES) {
-    throw new Error('Document image exceeds 2 MB');
-  }
-
-  const source = file.source ?? FileSources.local;
-  const strategy = getStrategyFunctions(source);
-  if (!strategy.getDownloadStream) {
-    throw new Error('LibreChat image storage cannot be read');
-  }
-  const stream = await strategy.getDownloadStream(req, file.filepath);
-  const buffer = await streamToLimitedBuffer(stream, MAX_DOCUMENT_IMAGE_BYTES);
-  const type = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
-  return `data:${type};base64,${buffer.toString('base64')}`;
-}
-
-async function prepareDocumentToolArguments({ serverName, toolName, toolArguments, req, user }) {
-  if (serverName !== 'documents' || !DOCUMENT_TOOLS.has(toolName)) {
-    return toolArguments;
-  }
-  return resolveDocumentImageReferences(toolArguments, (reference) =>
-    resolveLibreChatDocumentImage({ ...reference, req, user }),
-  );
-}
 
 async function userCanUseMCPServers(user, req) {
   if (!user?.id || !user?.role) {
@@ -313,7 +243,6 @@ function isEmptyObjectSchema(jsonSchema) {
 /**
  * @param {object} params
  * @param {ServerResponse} params.res - The Express response object for sending events.
- * @param {ServerRequest} [params.req] - The originating request for file storage access.
  * @param {string} params.stepId - The ID of the step in the flow.
  * @param {ToolCallChunk} params.toolCall - The tool call object containing tool information.
  * @param {string | null} [params.streamId] - The stream ID for resumable mode.
@@ -585,11 +514,12 @@ async function reconnectServer({
  * @param {import('@librechat/api').RequestBody} [params.requestBody]
  * @param {import('@librechat/api').RequestScopedMCPConnectionStore} [params.requestScopedConnections]
  * @param {Record<string, Record<string, string>>} [params.userMCPAuthMap]
+ * @param {ResolveToolImages} [params.resolveToolImages] - Resolves LibreChat image references in tool arguments.
  * @returns { Promise<Array<typeof tool | { _call: (toolInput: Object | string) => unknown}>> } An object with `_call` method to execute the tool input.
  */
 async function createMCPTools({
   res,
-  req,
+  resolveToolImages,
   mcpPermissionContext,
   user,
   index,
@@ -660,7 +590,7 @@ async function createMCPTools({
   for (const tool of result.tools) {
     const toolInstance = await createMCPTool({
       res,
-      req,
+      resolveToolImages,
       mcpPermissionContext,
       user,
       provider,
@@ -685,7 +615,7 @@ async function createMCPTools({
  * Creates a single tool from the specified MCP Server via `toolKey`.
  * @param {Object} params
  * @param {ServerResponse} params.res - The Express response object for sending events.
- * @param {ServerRequest} [params.req] - The originating request for file storage access.
+ * @param {ResolveToolImages} [params.resolveToolImages] - Resolves LibreChat image references in tool arguments.
  * @param {{ canUseServers: (user?: IUser) => Promise<boolean> }} [params.mcpPermissionContext] - Request-scoped MCP permission context.
  * @param {IUser} params.user - The user from the request object.
  * @param {string} params.toolKey - The toolKey for the tool.
@@ -704,7 +634,7 @@ async function createMCPTools({
  */
 async function createMCPTool({
   res,
-  req,
+  resolveToolImages,
   mcpPermissionContext,
   user,
   index,
@@ -802,7 +732,7 @@ async function createMCPTool({
 
   return createToolInstance({
     res,
-    req,
+    resolveToolImages,
     mcpPermissionContext,
     user,
     requestBody,
@@ -818,7 +748,7 @@ async function createMCPTool({
 
 function createToolInstance({
   res,
-  req: capturedReq,
+  resolveToolImages,
   mcpPermissionContext,
   user: capturedUser = null,
   requestBody: capturedRequestBody,
@@ -909,13 +839,14 @@ function createToolInstance({
       const customUserVars =
         config?.configurable?.userMCPAuthMap?.[`${Constants.mcp_prefix}${serverName}`];
 
-      const preparedToolArguments = await prepareDocumentToolArguments({
-        serverName,
-        toolName,
-        toolArguments,
-        req: capturedReq,
-        user: effectiveUser,
-      });
+      const preparedToolArguments = resolveToolImages
+        ? await resolveToolImages({
+            serverName,
+            toolName,
+            toolArguments,
+            user: effectiveUser,
+          })
+        : toolArguments;
       const result = await mcpManager.callTool({
         serverName,
         serverConfig: capturedServerConfig,
