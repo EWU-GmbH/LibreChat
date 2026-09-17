@@ -309,7 +309,8 @@ export function createAdminUserManagementHandlers(deps: AdminUserManagementDeps)
   }
 
   async function revokeInvite(req: ServerRequest, res: Response): Promise<Response> {
-    const email = (req.params.email ?? '').trim().toLowerCase();
+    const { email: rawEmail } = req.params as { email?: string };
+    const email = (rawEmail ?? '').trim().toLowerCase();
     if (!email) {
       return res.status(400).json({ error: 'Email is required' });
     }
@@ -327,7 +328,7 @@ export function createAdminUserManagementHandlers(deps: AdminUserManagementDeps)
   }
 
   async function updateStatus(req: ServerRequest, res: Response): Promise<Response> {
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
     const { blocked } = req.body as StatusBody;
     if (!isValidObjectIdString(id) || typeof blocked !== 'boolean') {
       return res.status(400).json({ error: 'Invalid status request' });
@@ -376,7 +377,7 @@ export function createAdminUserManagementHandlers(deps: AdminUserManagementDeps)
   }
 
   async function updateMCPAccess(req: ServerRequest, res: Response): Promise<Response> {
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
     const { mcpAccess } = req.body as MCPAccessBody;
     if (!isValidObjectIdString(id)) {
       return res.status(400).json({ error: 'Invalid user ID' });

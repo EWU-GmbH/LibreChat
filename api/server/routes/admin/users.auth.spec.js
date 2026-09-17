@@ -52,10 +52,12 @@ describe('admin users route authorization', () => {
   const app = express().use(express.json()).use('/api/admin/users', usersRouter);
 
   it('returns 403 for a non-admin user', async () => {
-    await request(app).get('/api/admin/users').set('x-test-role', 'user').expect(403);
+    const res = await request(app).get('/api/admin/users').set('x-test-role', 'user');
+    expect(res.status).toBe(403);
   });
 
   it('allows an administrator to list users', async () => {
-    await request(app).get('/api/admin/users').set('x-test-role', 'admin').expect(200);
+    const res = await request(app).get('/api/admin/users').set('x-test-role', 'admin');
+    expect(res.status).toBe(200);
   });
 });
