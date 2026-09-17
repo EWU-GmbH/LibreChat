@@ -102,7 +102,9 @@ describe('resolveDocumentToolImages', () => {
       },
     ]);
     const missing = Object.assign(
-      new Error("ENOENT: no such file or directory, open '/app/client/public/images/user-1/orphan.png'"),
+      new Error(
+        "ENOENT: no such file or directory, open '/app/client/public/images/user-1/orphan.png'",
+      ),
       { code: 'ENOENT' },
     );
     mockGetDownloadStream.mockImplementation(async (_req, filepath) => {
@@ -125,7 +127,9 @@ describe('resolveDocumentToolImages', () => {
       user,
     });
 
-    expect(result.blocks[0].src).toBe(`data:image/png;base64,${Buffer.from('flux').toString('base64')}`);
+    expect(result.blocks[0].src).toBe(
+      `data:image/png;base64,${Buffer.from('flux').toString('base64')}`,
+    );
     expect(mockGetDownloadStream).toHaveBeenCalledTimes(2);
   });
 
@@ -142,7 +146,9 @@ describe('resolveDocumentToolImages', () => {
       },
     ]);
     const missing = Object.assign(
-      new Error("ENOENT: no such file or directory, open '/app/client/public/images/user-1/orphan.png'"),
+      new Error(
+        "ENOENT: no such file or directory, open '/app/client/public/images/user-1/orphan.png'",
+      ),
       { code: 'ENOENT' },
     );
     mockGetDownloadStream.mockImplementation(async () => {
