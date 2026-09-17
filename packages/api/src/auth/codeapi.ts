@@ -371,10 +371,20 @@ export async function mintCodeApiToken(req: ServerRequest): Promise<string> {
   return token;
 }
 
-export async function getCodeApiAuthHeaders(req?: ServerRequest): Promise<Record<string, string>> {
-  if (!req || !isCodeApiJwtAuthEnabled()) {
+function getCodeApiKeyHeaders(): Record<string, string> {
+  const apiKey = process.env.LIBRECHAT_CODE_API_KEY?.trim();
+  if (!apiKey) {
     return {};
   }
-  const token = await mintCodeApiToken(req);
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return { 'x-api-key': apiKey };
+}
+
+export async function getCodeApiAuthHeaders(req?: ServerRequest): Promise<Record<string, string>> {
+  if (req && isCodeApiJwtAuthEnabled()) {
+    const token = await mintCodeApiToken(req);
+    if (token) {
+      return { Authorization: `Bearer ${token}` };
+    }
+  }
+  return getCodeApiKeyHeaders();
 }
