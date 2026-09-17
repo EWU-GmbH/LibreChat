@@ -161,8 +161,8 @@ describe('markdown and image safety', () => {
         ({
           ok: true,
           status: 200,
-          arrayBuffer: async () => svg,
-        }) as Pick<Response, 'arrayBuffer' | 'ok' | 'status'>,
+          arrayBuffer: async () => Uint8Array.from(svg).buffer,
+        }) satisfies Pick<Response, 'arrayBuffer' | 'ok' | 'status'>,
       lookup: async () => [{ address: '93.184.216.34', family: 4 }],
     });
 

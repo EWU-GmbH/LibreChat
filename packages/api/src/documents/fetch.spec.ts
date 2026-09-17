@@ -54,7 +54,7 @@ describe('URL fetcher', () => {
   });
 
   it('rejects hostnames resolving to private addresses before fetching', async () => {
-    const fetchMock = jest.fn<typeof fetch>();
+    const fetchMock = jest.fn<Promise<Response>, [string | URL, RequestInit?]>();
 
     await expect(
       fetchUrl('https://example.com', {
@@ -66,7 +66,7 @@ describe('URL fetcher', () => {
   });
 
   it('honors robots.txt before returning page content', async () => {
-    const fetchMock = jest.fn<typeof fetch>(async (input) => {
+    const fetchMock = jest.fn<Promise<Response>, [string | URL, RequestInit?]>(async (input) => {
       const url = new URL(input.toString());
       if (url.pathname === '/robots.txt') {
         return response('User-agent: *\nDisallow: /intern', {
@@ -83,7 +83,7 @@ describe('URL fetcher', () => {
   });
 
   it('revalidates redirect targets and blocks redirects to private hosts', async () => {
-    const fetchMock = jest.fn<typeof fetch>(async (input) => {
+    const fetchMock = jest.fn<Promise<Response>, [string | URL, RequestInit?]>(async (input) => {
       const url = new URL(input.toString());
       if (url.pathname === '/robots.txt') {
         return response('', { headers: { 'Content-Type': 'text/plain' } });
@@ -100,7 +100,7 @@ describe('URL fetcher', () => {
   });
 
   it('fetches an allowed page and exposes its final URL', async () => {
-    const fetchMock = jest.fn<typeof fetch>(async (input) => {
+    const fetchMock = jest.fn<Promise<Response>, [string | URL, RequestInit?]>(async (input) => {
       const url = new URL(input.toString());
       if (url.pathname === '/robots.txt') {
         return response('User-agent: *\nAllow: /', {
@@ -121,7 +121,7 @@ describe('URL fetcher', () => {
   });
 
   it('rejects responses over the size limit before reading them', async () => {
-    const fetchMock = jest.fn<typeof fetch>(async (input) => {
+    const fetchMock = jest.fn<Promise<Response>, [string | URL, RequestInit?]>(async (input) => {
       const url = new URL(input.toString());
       if (url.pathname === '/robots.txt') {
         return response('', { headers: { 'Content-Type': 'text/plain' } });

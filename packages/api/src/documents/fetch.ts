@@ -1,8 +1,8 @@
 import { load } from 'cheerio';
 import { isIP } from 'node:net';
-import { lookup as dnsLookup } from 'node:dns/promises';
-import { NodeHtmlMarkdown } from 'node-html-markdown';
 import robotsParser from 'robots-parser';
+import { NodeHtmlMarkdown } from 'node-html-markdown';
+import { lookup as dnsLookup } from 'node:dns/promises';
 import { isBlockedIp } from './images';
 
 const USER_AGENT = 'EWU-KI-URL-Fetcher/1.0';
@@ -22,7 +22,7 @@ const BLOCKED_HOSTS = new Set([
 ]);
 
 export interface FetchUrlDeps {
-  fetch: typeof globalThis.fetch;
+  fetch: (input: string | URL, init?: RequestInit) => Promise<Response>;
   lookup: (hostname: string) => Promise<Array<{ address: string; family: number }>>;
 }
 
