@@ -32,6 +32,7 @@ export function clearLocalStorage(skipFirst?: boolean) {
     }
     if (
       key.startsWith(LocalStorageKeys.LAST_MCP_) ||
+      key.startsWith(LocalStorageKeys.LAST_PII_PROTECTION_TOGGLE_) ||
       key.startsWith(LocalStorageKeys.LAST_CODE_TOGGLE_) ||
       key.startsWith(LocalStorageKeys.ASST_ID_PREFIX) ||
       key.startsWith(LocalStorageKeys.AGENT_ID_PREFIX) ||
@@ -68,6 +69,7 @@ export function clearAllConversationStorage() {
   keys.forEach((key) => {
     if (
       key.startsWith(LocalStorageKeys.LAST_MCP_) ||
+      key.startsWith(LocalStorageKeys.LAST_PII_PROTECTION_TOGGLE_) ||
       key.startsWith(LocalStorageKeys.LAST_CODE_TOGGLE_) ||
       key.startsWith(LocalStorageKeys.TEXT_DRAFT) ||
       key.startsWith(LocalStorageKeys.ASST_ID_PREFIX) ||

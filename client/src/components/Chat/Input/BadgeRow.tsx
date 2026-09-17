@@ -15,8 +15,9 @@ import type { BadgeItem } from '~/common';
 import CodeInterpreter from './CodeInterpreter';
 import { BadgeRowProvider } from '~/Providers';
 import ToolsDropdown from './ToolsDropdown';
-import { useChatBadges } from '~/hooks';
+import PIIProtection from './PIIProtection';
 import ToolDialogs from './ToolDialogs';
+import { useChatBadges } from '~/hooks';
 import FileSearch from './FileSearch';
 import Artifacts from './Artifacts';
 import MCPSelect from './MCPSelect';
@@ -27,6 +28,7 @@ import store from '~/store';
 interface BadgeRowProps {
   showEphemeralBadges?: boolean;
   showMCPSelect?: boolean;
+  showPIIProtection?: boolean;
   onChange: (badges: Pick<BadgeItem, 'id'>[]) => void;
   onToggle?: (badgeId: string, currentActive: boolean) => void;
   conversationId?: string | null;
@@ -145,6 +147,7 @@ const dragReducer = (state: DragState, action: DragAction): DragState => {
 function BadgeRow({
   showEphemeralBadges,
   showMCPSelect,
+  showPIIProtection,
   conversationId,
   specName,
   isSubmitting,
@@ -380,6 +383,7 @@ function BadgeRow({
             <Artifacts />
           </>
         )}
+        {showPIIProtection === true && <PIIProtection />}
         {showMCPSelect === true && <MCPSelect alwaysVisible={showEphemeralBadges !== true} />}
         {ghostBadge && (
           <div

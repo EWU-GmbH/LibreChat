@@ -54,6 +54,7 @@ import { filterFilesByEndpointConfig } from '~/files';
 import { generateArtifactsPrompt } from '~/prompts';
 import { getProviderConfig } from '~/endpoints';
 import { primeResources } from './resources';
+import { applyPiiProtection } from './pii';
 
 /**
  * Fraction of context budget reserved as headroom when no explicit maxContextTokens is set.
@@ -1000,6 +1001,7 @@ export async function initializeAgent(
   });
 
   const llmConfig = options.llmConfig as Record<string, unknown>;
+  applyPiiProtection(llmConfig, req.body?.ephemeralAgent?.pii_protection === true);
   const tokensModel =
     agent.provider === EModelEndpoint.azureOpenAI ? agent.model : (llmConfig?.model as string);
   const maxOutputTokens = optionalChainWithEmptyCheck(

@@ -309,6 +309,7 @@ export function applyModelSpecEphemeralAgent({
   // If localStorage is empty (e.g., cleared), spec values stand alone.
   if (key !== Constants.NEW_CONVO) {
     const toolStorageMap: Array<[keyof t.TEphemeralAgent, string]> = [
+      ['pii_protection', LocalStorageKeys.LAST_PII_PROTECTION_TOGGLE_],
       ['execute_code', LocalStorageKeys.LAST_CODE_TOGGLE_],
       ['web_search', LocalStorageKeys.LAST_WEB_SEARCH_TOGGLE_],
       ['file_search', LocalStorageKeys.LAST_FILE_SEARCH_TOGGLE_],

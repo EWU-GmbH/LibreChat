@@ -6,6 +6,7 @@ const {
   FileContext,
   ErrorTypes,
   UsageEvents,
+  ContentTypes,
 } = require('librechat-data-provider');
 const {
   GraphEvents,
@@ -359,6 +360,40 @@ function getDefaultHandlers({
         aggregateContent({ event, data });
         if (data?.stepDetails.type === StepTypes.TOOL_CALLS) {
           await emitEvent(res, streamId, { event, data });
+          const toolCalls = data?.stepDetails?.tool_calls;
+          if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+            const labels = toolCalls
+              .map((tc) => {
+                const name = typeof tc?.name === 'string' ? tc.name : '';
+                if (name.includes('dataforseo')) {
+                  return 'DataForSEO';
+                }
+                if (name.includes('formbricks')) {
+                  return 'Formbricks';
+                }
+                if (name.includes('mcp_')) {
+                  return 'MCP';
+                }
+                return null;
+              })
+              .filter(Boolean);
+            const unique = [...new Set(labels)];
+            if (unique.length > 0) {
+              const status =
+                unique.length === 1
+                  ? `Rufe ${unique[0]} auf…`
+                  : `Rufe ${unique.join(' und ')} auf…`;
+              await emitEvent(res, streamId, {
+                event: GraphEvents.ON_MESSAGE_DELTA,
+                data: {
+                  id: data.id,
+                  delta: {
+                    content: [{ type: ContentTypes.TEXT, text: `${status}\n\n` }],
+                  },
+                },
+              });
+            }
+          }
         } else if (checkIfLastAgent(metadata?.last_agent_id, metadata?.langgraph_node)) {
           await emitEvent(res, streamId, { event, data });
         } else if (!metadata?.hide_sequential_outputs) {

@@ -12,6 +12,10 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
+from collections import OrderedDict
+from hashlib import sha256
+from threading import Lock
 from typing import Dict, List, Optional, Tuple
 
 from presidio_analyzer import (
@@ -54,6 +58,37 @@ ENTITY_LABELS: Dict[str, str] = {
 SUPPORTED_ENTITIES: List[str] = list(ENTITY_LABELS.keys())
 
 DEFAULT_SCORE_THRESHOLD = 0.35
+DEFAULT_ANALYSIS_CACHE_SIZE = 2048
+
+# Entities detectable via PatternRecognizer alone (no spaCy/GLiNER). Used for
+# tool-role payloads so agent loops do not re-run full NER on MCP JSON.
+STRUCTURED_ONLY_ENTITIES: Tuple[str, ...] = (
+    "IBAN_CODE",
+    "EMAIL_ADDRESS",
+    "PHONE_NUMBER",
+    "CREDIT_CARD",
+    "DE_ADDRESS",
+    "DE_POSTAL_CODE",
+    "DE_CUSTOMER_ID",
+    "DE_CASE_ID",
+    "DE_TAX_ID",
+    "DE_HEALTH_INSURANCE_ID",
+    "DE_SOCIAL_INSURANCE_ID",
+    "DE_LICENSE_PLATE",
+)
+
+
+def _analysis_cache_size() -> int:
+    raw = os.environ.get("GATEWAY_PII_CACHE_SIZE", str(DEFAULT_ANALYSIS_CACHE_SIZE))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return DEFAULT_ANALYSIS_CACHE_SIZE
+
+
+_CachedResult = Tuple[str, int, int, float]
+_ANALYSIS_CACHE: "OrderedDict[str, Tuple[_CachedResult, ...]]" = OrderedDict()
+_ANALYSIS_CACHE_LOCK = Lock()
 
 # --- GLiNER (high-recall NER) configuration -------------------------------
 # EWU has confirmed there is NO health data, and an occasional missed CITY is
@@ -424,6 +459,117 @@ def _filter_person_results(
     return filtered
 
 
+def _analysis_cache_key(analyzer: AnalyzerEngine, text: str, threshold: float) -> str:
+    digest = sha256(text.encode("utf-8")).hexdigest()
+    return f"{id(analyzer)}:{threshold}:{len(text)}:{digest}"
+
+
+def _get_cached_analysis(
+    analyzer: AnalyzerEngine,
+    text: str,
+    threshold: float,
+) -> Optional[List[RecognizerResult]]:
+    cache_key = _analysis_cache_key(analyzer, text, threshold)
+    with _ANALYSIS_CACHE_LOCK:
+        cached = _ANALYSIS_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        _ANALYSIS_CACHE.move_to_end(cache_key)
+    return [
+        RecognizerResult(entity_type=entity, start=start, end=end, score=score)
+        for entity, start, end, score in cached
+    ]
+
+
+def _store_cached_analysis(
+    analyzer: AnalyzerEngine,
+    text: str,
+    threshold: float,
+    results: List[RecognizerResult],
+) -> None:
+    cache_size = _analysis_cache_size()
+    if cache_size == 0:
+        return
+    cache_key = _analysis_cache_key(analyzer, text, threshold)
+    cache_value = tuple(
+        (result.entity_type, result.start, result.end, result.score) for result in results
+    )
+    with _ANALYSIS_CACHE_LOCK:
+        _ANALYSIS_CACHE[cache_key] = cache_value
+        _ANALYSIS_CACHE.move_to_end(cache_key)
+        while len(_ANALYSIS_CACHE) > cache_size:
+            _ANALYSIS_CACHE.popitem(last=False)
+
+
+def _analyze(
+    analyzer: AnalyzerEngine,
+    nlp,
+    text: str,
+    threshold: float,
+) -> Tuple[List[RecognizerResult], bool]:
+    cache_size = _analysis_cache_size()
+    if cache_size > 0:
+        cached = _get_cached_analysis(analyzer, text, threshold)
+        if cached is not None:
+            return cached, True
+
+    results = analyzer.analyze(
+        text=text,
+        language="de",
+        entities=SUPPORTED_ENTITIES,
+        score_threshold=threshold,
+    )
+    filtered = _filter_person_results(text, list(results), nlp)
+    _store_cached_analysis(analyzer, text, threshold, filtered)
+    return filtered, False
+
+
+def _clear_analysis_cache() -> None:
+    with _ANALYSIS_CACHE_LOCK:
+        _ANALYSIS_CACHE.clear()
+
+
+def _analysis_chunks(text: str) -> List[str]:
+    """Split independent paragraphs so dynamic prompt fragments do not invalidate the whole cache."""
+    return re.split(r"(\n[ \t]*\n)", text)
+
+
+def _prime_chunk_cache(
+    analyzer: AnalyzerEngine,
+    text: str,
+    threshold: float,
+    results: List[RecognizerResult],
+) -> None:
+    chunks = _analysis_chunks(text)
+    ranges: List[Tuple[int, str]] = []
+    offset = 0
+    for chunk in chunks:
+        if chunk.strip():
+            ranges.append((offset, chunk))
+        offset += len(chunk)
+
+    result_ranges: List[Tuple[int, str, List[RecognizerResult]]] = []
+    for start, chunk in ranges:
+        end = start + len(chunk)
+        local = [
+            RecognizerResult(
+                entity_type=result.entity_type,
+                start=result.start - start,
+                end=result.end - start,
+                score=result.score,
+            )
+            for result in results
+            if result.start >= start and result.end <= end
+        ]
+        result_ranges.append((start, chunk, local))
+
+    cached_result_count = sum(len(local) for _, _, local in result_ranges)
+    if cached_result_count != len(results):
+        return
+    for _, chunk, local in result_ranges:
+        _store_cached_analysis(analyzer, chunk, threshold, local)
+
+
 def _resolve_overlaps(results: List[RecognizerResult]) -> List[RecognizerResult]:
     """Greedily keep the highest-scoring, non-overlapping spans."""
     ordered = sorted(results, key=lambda r: (-r.score, r.start, -(r.end - r.start)))
@@ -447,6 +593,9 @@ class Pseudonymizer:
         self._counters: Dict[str, int] = {}
         self._value_to_placeholder: Dict[Tuple[str, str], str] = {}
         self.placeholder_to_value: Dict[str, str] = {}
+        self._analysis_cache_hits = 0
+        self._analysis_cache_misses = 0
+        self._analysis_duration_ms = 0.0
 
     def _placeholder_for(self, entity_type: str, original: str) -> str:
         label = ENTITY_LABELS.get(entity_type, entity_type)
@@ -463,13 +612,69 @@ class Pseudonymizer:
     def mask(self, text: str) -> str:
         if not text or not text.strip():
             return text
-        results = self._analyzer.analyze(
-            text=text,
-            language="de",
-            entities=SUPPORTED_ENTITIES,
-            score_threshold=self._threshold,
+        full_cached = _get_cached_analysis(self._analyzer, text, self._threshold)
+        if full_cached is not None:
+            self._analysis_cache_hits += 1
+            return self._apply_results(text, full_cached)
+
+        chunks = _analysis_chunks(text)
+        has_cached_chunk = any(
+            chunk.strip()
+            and _get_cached_analysis(self._analyzer, chunk, self._threshold) is not None
+            for chunk in chunks
         )
-        results = _filter_person_results(text, list(results), self._nlp)
+        if not has_cached_chunk:
+            started_at = time.perf_counter()
+            results, _ = _analyze(self._analyzer, self._nlp, text, self._threshold)
+            self._analysis_duration_ms += (time.perf_counter() - started_at) * 1000
+            self._analysis_cache_misses += 1
+            _prime_chunk_cache(self._analyzer, text, self._threshold, results)
+            return self._apply_results(text, results)
+        return "".join(self._mask_chunk(chunk) for chunk in _analysis_chunks(text))
+
+    def mask_structured(self, text: str) -> str:
+        """Regex/pattern-only masking for tool payloads (skips spaCy + GLiNER)."""
+        if not text or not text.strip():
+            return text
+        started_at = time.perf_counter()
+        results: List[RecognizerResult] = []
+        allowed = set(STRUCTURED_ONLY_ENTITIES)
+        for recognizer in self._analyzer.registry.recognizers:
+            if not isinstance(recognizer, PatternRecognizer):
+                continue
+            supported = set(getattr(recognizer, "supported_entities", None) or [])
+            entities = sorted(supported & allowed)
+            if not entities:
+                continue
+            try:
+                found = recognizer.analyze(text, entities=entities)
+            except Exception as exc:  # noqa: BLE001 - never break the gateway path
+                log.debug("Structured recognizer %s failed: %s", getattr(recognizer, "name", "?"), exc)
+                continue
+            for res in found:
+                if res.score >= self._threshold:
+                    results.append(res)
+        self._analysis_duration_ms += (time.perf_counter() - started_at) * 1000
+        return self._apply_results(text, results)
+
+    def _mask_chunk(self, text: str) -> str:
+        if not text.strip():
+            return text
+        started_at = time.perf_counter()
+        results, cache_hit = _analyze(
+            self._analyzer,
+            self._nlp,
+            text,
+            self._threshold,
+        )
+        self._analysis_duration_ms += (time.perf_counter() - started_at) * 1000
+        if cache_hit:
+            self._analysis_cache_hits += 1
+        else:
+            self._analysis_cache_misses += 1
+        return self._apply_results(text, results)
+
+    def _apply_results(self, text: str, results: List[RecognizerResult]) -> str:
         kept = _resolve_overlaps(results)
         # Replace from right to left so indices stay valid.
         for res in sorted(kept, key=lambda r: r.start, reverse=True):
@@ -505,6 +710,13 @@ class Pseudonymizer:
             label = match.group(1) if match else placeholder
             counts[label] = counts.get(label, 0) + 1
         return counts
+
+    def analysis_stats(self) -> Dict[str, float | int]:
+        return {
+            "cache_hits": self._analysis_cache_hits,
+            "cache_misses": self._analysis_cache_misses,
+            "duration_ms": round(self._analysis_duration_ms, 1),
+        }
 
 
 class StreamRestorer:

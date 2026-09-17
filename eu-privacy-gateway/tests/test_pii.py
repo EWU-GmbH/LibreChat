@@ -11,7 +11,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from gateway.app import _restore_tool_calls
-from gateway.pii import Pseudonymizer, StreamRestorer, get_analyzer
+from presidio_analyzer import RecognizerResult
+
+from gateway.pii import (
+    Pseudonymizer,
+    StreamRestorer,
+    _clear_analysis_cache,
+    get_analyzer,
+)
 
 SAMPLE = (
     "Bitte fasse zusammen: Patient Dr. Katharina Vogel, Kundennummer 4711-8890, "
@@ -195,6 +202,127 @@ def test_tool_call_arguments_restored():
     assert "[PERSON_" not in tool_calls[0]["function"]["arguments"]
 
 
+def test_analysis_cache_reuses_spans_without_reusing_pii_values():
+    class FakeAnalyzer:
+        nlp_engine = None
+
+        def __init__(self):
+            self.calls = 0
+
+        def analyze(self, text, language, entities, score_threshold):
+            self.calls += 1
+            return [
+                RecognizerResult(
+                    entity_type="EMAIL_ADDRESS",
+                    start=0,
+                    end=len(text),
+                    score=1.0,
+                )
+            ]
+
+    _clear_analysis_cache()
+    analyzer = FakeAnalyzer()
+    first = Pseudonymizer(analyzer)
+    second = Pseudonymizer(analyzer)
+
+    assert first.mask("erste@example.com") == "[EMAIL_1]"
+    assert second.mask("erste@example.com") == "[EMAIL_1]"
+    assert second.restore("[EMAIL_1]") == "erste@example.com"
+    assert analyzer.calls == 1
+    assert first.analysis_stats()["cache_misses"] == 1
+    assert second.analysis_stats()["cache_hits"] == 1
+
+
+def test_analysis_cache_reuses_static_paragraphs_when_one_fragment_changes():
+    class FakeAnalyzer:
+        nlp_engine = None
+
+        def __init__(self):
+            self.calls = 0
+
+        def analyze(self, text, language, entities, score_threshold):
+            self.calls += 1
+            return []
+
+    _clear_analysis_cache()
+    analyzer = FakeAnalyzer()
+
+    Pseudonymizer(analyzer).mask("Statisch A\n\nZeit 1\n\nStatisch B")
+    second = Pseudonymizer(analyzer)
+    second.mask("Statisch A\n\nZeit 2\n\nStatisch B")
+
+    assert analyzer.calls == 2
+    assert second.analysis_stats()["cache_hits"] == 2
+    assert second.analysis_stats()["cache_misses"] == 1
+
+
+def test_mask_structured_skips_analyzer_analyze():
+    class BoomAnalyzer:
+        nlp_engine = None
+        registry = type("Reg", (), {"recognizers": []})()
+
+        def analyze(self, *args, **kwargs):
+            raise AssertionError("full analyze must not run for structured masking")
+
+    _clear_analysis_cache()
+    pseudo = Pseudonymizer(BoomAnalyzer())
+    assert pseudo.mask_structured('{"search_volume": 3600, "cpc": 4.69}') == (
+        '{"search_volume": 3600, "cpc": 4.69}'
+    )
+    assert pseudo.analysis_stats()["cache_misses"] == 0
+
+
+def test_mask_messages_uses_structured_path_for_tool_role():
+    from gateway.app import _mask_messages
+
+    class BoomAnalyzer:
+        nlp_engine = None
+        registry = type("Reg", (), {"recognizers": []})()
+
+        def analyze(self, *args, **kwargs):
+            raise AssertionError("tool role must not call full NER")
+
+    _clear_analysis_cache()
+    pseudo = Pseudonymizer(BoomAnalyzer())
+    masked = _mask_messages(
+        [
+            {
+                "role": "tool",
+                "content": '{"keyword":"businessplan erstellen","search_volume":3600}',
+            },
+        ],
+        pseudo,
+        full_analysis=True,
+    )
+    assert masked[0]["content"].startswith("{")
+    assert pseudo.analysis_stats()["cache_misses"] == 0
+
+
+def test_mask_messages_defaults_to_structured_only_until_opted_in():
+    from gateway.app import _mask_messages
+
+    class FakeAnalyzer:
+        nlp_engine = None
+        registry = type("Reg", (), {"recognizers": []})()
+
+        def __init__(self):
+            self.calls = 0
+
+        def analyze(self, text, language, entities, score_threshold):
+            self.calls += 1
+            return []
+
+    _clear_analysis_cache()
+    analyzer = FakeAnalyzer()
+    messages = [{"role": "user", "content": "Mein Name ist Erika Mustermann"}]
+
+    _mask_messages(messages, Pseudonymizer(analyzer), full_analysis=False)
+    assert analyzer.calls == 0
+
+    _mask_messages(messages, Pseudonymizer(analyzer), full_analysis=True)
+    assert analyzer.calls == 1
+
+
 if __name__ == "__main__":
     test_mask_and_restore_roundtrip()
     test_stream_restorer_splits_placeholder_across_chunks()
@@ -204,4 +332,6 @@ if __name__ == "__main__":
     test_date_not_masked_but_name_is()
     test_structured_categories_masked()
     test_tool_call_arguments_restored()
+    test_mask_structured_skips_analyzer_analyze()
+    test_mask_messages_defaults_to_structured_only_until_opted_in()
     print("\nALL TESTS PASSED")
