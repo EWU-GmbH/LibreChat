@@ -292,9 +292,36 @@ def test_mask_messages_uses_structured_path_for_tool_role():
             },
         ],
         pseudo,
+        full_analysis=True,
     )
     assert masked[0]["content"].startswith("{")
     assert pseudo.analysis_stats()["cache_misses"] == 0
+
+
+def test_mask_messages_defaults_to_structured_only_until_opted_in():
+    from gateway.app import _mask_messages
+
+    class FakeAnalyzer:
+        nlp_engine = None
+        registry = type("Reg", (), {"recognizers": []})()
+
+        def __init__(self):
+            self.calls = 0
+
+        def analyze(self, text, language, entities, score_threshold):
+            self.calls += 1
+            return []
+
+    _clear_analysis_cache()
+    analyzer = FakeAnalyzer()
+    messages = [{"role": "user", "content": "Mein Name ist Erika Mustermann"}]
+
+    _mask_messages(messages, Pseudonymizer(analyzer), full_analysis=False)
+    assert analyzer.calls == 0
+
+    _mask_messages(messages, Pseudonymizer(analyzer), full_analysis=True)
+    assert analyzer.calls == 1
+
 
 if __name__ == "__main__":
     test_mask_and_restore_roundtrip()
@@ -306,4 +333,5 @@ if __name__ == "__main__":
     test_structured_categories_masked()
     test_tool_call_arguments_restored()
     test_mask_structured_skips_analyzer_analyze()
+    test_mask_messages_defaults_to_structured_only_until_opted_in()
     print("\nALL TESTS PASSED")

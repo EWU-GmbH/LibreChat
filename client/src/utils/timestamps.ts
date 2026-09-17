@@ -12,6 +12,7 @@ const CLEANUP_THRESHOLD = 2 * 24 * 60 * 60 * 1000;
  */
 const TIMESTAMPED_KEYS = [
   LocalStorageKeys.LAST_MCP_,
+  LocalStorageKeys.LAST_PII_PROTECTION_TOGGLE_,
   LocalStorageKeys.LAST_CODE_TOGGLE_,
   LocalStorageKeys.LAST_WEB_SEARCH_TOGGLE_,
   LocalStorageKeys.LAST_FILE_SEARCH_TOGGLE_,

@@ -16,6 +16,7 @@ interface BadgeRowContextType {
   conversationId?: string | null;
   storageContextKey?: string;
   agentsConfig?: TAgentsEndpoint | null;
+  piiProtection: ReturnType<typeof useToolToggle>;
   skills: ReturnType<typeof useToolToggle>;
   webSearch: ReturnType<typeof useToolToggle>;
   artifacts: ReturnType<typeof useToolToggle>;
@@ -96,18 +97,28 @@ export default function BadgeRowProvider({
       lastContextKeyRef.current = storageSuffix;
 
       const codeToggleKey = `${LocalStorageKeys.LAST_CODE_TOGGLE_}${storageSuffix}`;
+      const piiProtectionToggleKey = `${LocalStorageKeys.LAST_PII_PROTECTION_TOGGLE_}${storageSuffix}`;
       const webSearchToggleKey = `${LocalStorageKeys.LAST_WEB_SEARCH_TOGGLE_}${storageSuffix}`;
       const fileSearchToggleKey = `${LocalStorageKeys.LAST_FILE_SEARCH_TOGGLE_}${storageSuffix}`;
       const artifactsToggleKey = `${LocalStorageKeys.LAST_ARTIFACTS_TOGGLE_}${storageSuffix}`;
       const skillsToggleKey = `${LocalStorageKeys.LAST_SKILLS_TOGGLE_}${storageSuffix}`;
 
       const codeToggleValue = getTimestampedValue(codeToggleKey);
+      const piiProtectionToggleValue = getTimestampedValue(piiProtectionToggleKey);
       const webSearchToggleValue = getTimestampedValue(webSearchToggleKey);
       const fileSearchToggleValue = getTimestampedValue(fileSearchToggleKey);
       const artifactsToggleValue = getTimestampedValue(artifactsToggleKey);
       const skillsToggleValue = getTimestampedValue(skillsToggleKey);
 
       const initialValues: Record<string, boolean | string> = {};
+
+      if (piiProtectionToggleValue !== null) {
+        try {
+          initialValues.pii_protection = JSON.parse(piiProtectionToggleValue);
+        } catch (e) {
+          console.error('Failed to parse PII protection toggle value:', e);
+        }
+      }
 
       if (codeToggleValue !== null) {
         try {
@@ -207,6 +218,14 @@ export default function BadgeRowProvider({
     isAuthenticated: true,
   });
 
+  const piiProtection = useToolToggle({
+    conversationId,
+    storageContextKey,
+    toolKey: 'pii_protection',
+    localStorageKey: LocalStorageKeys.LAST_PII_PROTECTION_TOGGLE_,
+    isAuthenticated: true,
+  });
+
   /** WebSearch hooks */
   const searchApiKeyForm = useSearchApiKeyForm({});
   const { setIsDialogOpen: setWebSearchDialogOpen } = searchApiKeyForm;
@@ -253,6 +272,7 @@ export default function BadgeRowProvider({
   const mcpServerManager = useMCPServerManager({ conversationId, storageContextKey });
 
   const value: BadgeRowContextType = {
+    piiProtection,
     skills,
     webSearch,
     artifacts,

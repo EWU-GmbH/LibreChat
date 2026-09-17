@@ -131,13 +131,16 @@ def _mask_content(content: Any, pseudo: Pseudonymizer, *, structured_only: bool)
     return content
 
 
-def _mask_messages(messages: List[Dict[str, Any]], pseudo: Pseudonymizer) -> List[Dict[str, Any]]:
+def _mask_messages(
+    messages: List[Dict[str, Any]],
+    pseudo: Pseudonymizer,
+    *,
+    full_analysis: bool,
+) -> List[Dict[str, Any]]:
     masked: List[Dict[str, Any]] = []
     for msg in messages:
         new_msg = dict(msg)
-        # MCP/tool payloads are API JSON. Full NER on every agent round dominated
-        # DataForSEO wall time (~10–20 s/miss). Keep regex masking for structured IDs.
-        structured_only = msg.get("role") == "tool"
+        structured_only = not full_analysis or msg.get("role") == "tool"
         if "content" in msg:
             new_msg["content"] = _mask_content(
                 msg.get("content"),
@@ -228,9 +231,11 @@ async def chat_completions(request: Request) -> Any:
     body = await request.json()
     messages: List[Dict[str, Any]] = body.get("messages", [])
     stream: bool = bool(body.get("stream", False))
+    full_analysis = body.pop("pii_protection", False) is True
 
     pseudo = Pseudonymizer(get_analyzer())
-    masked_messages = _mask_messages(messages, pseudo)
+    masked_messages = _mask_messages(messages, pseudo, full_analysis=full_analysis)
+    log.info("PII analysis mode: %s", "GLiNER opt-in" if full_analysis else "regex default")
     _log_mask_summary(messages, masked_messages, pseudo)
 
     payload = _build_upstream_payload(body, masked_messages)

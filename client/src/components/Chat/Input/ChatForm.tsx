@@ -121,6 +121,7 @@ const ChatForm = memo(function ChatForm({
    * conversations need the picker even though their other tool badges are hidden.
    */
   const showMCPSelect = !!endpoint && !hideBadgeRow && !isAssistantsEndpoint(endpoint);
+  const showPIIProtection = !!endpoint && !hideBadgeRow && !isAssistantsEndpoint(endpoint);
   const conversationId = useMemo(
     () => conversation?.conversationId ?? Constants.NEW_CONVO,
     [conversation?.conversationId],
@@ -386,6 +387,7 @@ const ChatForm = memo(function ChatForm({
               <BadgeRow
                 showEphemeralBadges={showEphemeralBadges}
                 showMCPSelect={showMCPSelect}
+                showPIIProtection={showPIIProtection}
                 isSubmitting={isSubmitting}
                 conversationId={conversationId}
                 specName={conversation?.spec}

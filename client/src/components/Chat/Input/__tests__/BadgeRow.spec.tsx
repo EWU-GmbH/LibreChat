@@ -69,6 +69,11 @@ jest.mock('../MCPSelect', () => ({
   },
 }));
 
+jest.mock('../PIIProtection', () => ({
+  __esModule: true,
+  default: () => <div data-testid="pii-protection" />,
+}));
+
 describe('BadgeRow', () => {
   beforeEach(() => {
     mcpSelectProps.length = 0;
@@ -83,6 +88,21 @@ describe('BadgeRow', () => {
     expect(screen.queryByTestId('web-search')).not.toBeInTheDocument();
     expect(screen.queryByTestId('tools-dropdown')).not.toBeInTheDocument();
     expect(mcpSelectProps).toEqual([{ alwaysVisible: true }]);
+  });
+
+  it('renders PII protection independently of agent tool badges', () => {
+    render(
+      <BadgeRow
+        showEphemeralBadges={false}
+        showMCPSelect={true}
+        showPIIProtection={true}
+        onChange={jest.fn()}
+        isInChat
+      />,
+    );
+
+    expect(screen.getByTestId('pii-protection')).toBeInTheDocument();
+    expect(screen.queryByTestId('web-search')).not.toBeInTheDocument();
   });
 
   it('renders the MCP picker alongside ephemeral badges and keeps it pin-driven', () => {

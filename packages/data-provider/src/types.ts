@@ -103,6 +103,7 @@ export type TEndpointOption = Pick<
 
 export type TEphemeralAgent = {
   mcp?: string[];
+  pii_protection?: boolean;
   web_search?: boolean;
   file_search?: boolean;
   execute_code?: boolean;

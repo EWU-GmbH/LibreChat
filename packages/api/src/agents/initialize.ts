@@ -990,6 +990,7 @@ export async function initializeAgent(
   const finalModelOptions = {
     ...modelOptions,
     model: agent.model,
+    ...(req.body?.ephemeralAgent?.pii_protection === true ? { pii_protection: true } : {}),
   };
 
   const options: InitializeResultBase = await getOptions({

@@ -22,11 +22,13 @@ import Artifacts from './Artifacts';
 import MCPSelect from './MCPSelect';
 import WebSearch from './WebSearch';
 import Skills from './Skills';
+import PIIProtection from './PIIProtection';
 import store from '~/store';
 
 interface BadgeRowProps {
   showEphemeralBadges?: boolean;
   showMCPSelect?: boolean;
+  showPIIProtection?: boolean;
   onChange: (badges: Pick<BadgeItem, 'id'>[]) => void;
   onToggle?: (badgeId: string, currentActive: boolean) => void;
   conversationId?: string | null;
@@ -145,6 +147,7 @@ const dragReducer = (state: DragState, action: DragAction): DragState => {
 function BadgeRow({
   showEphemeralBadges,
   showMCPSelect,
+  showPIIProtection,
   conversationId,
   specName,
   isSubmitting,
@@ -380,6 +383,7 @@ function BadgeRow({
             <Artifacts />
           </>
         )}
+        {showPIIProtection === true && <PIIProtection />}
         {showMCPSelect === true && <MCPSelect alwaysVisible={showEphemeralBadges !== true} />}
         {ghostBadge && (
           <div
