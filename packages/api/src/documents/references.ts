@@ -1,5 +1,14 @@
 export const LIBRECHAT_IMAGE_PREFIX: string = 'lc-file:';
 export const LATEST_LIBRECHAT_IMAGE: string = `${LIBRECHAT_IMAGE_PREFIX}latest`;
+export const LATEST_IMAGE_PATTERN: RegExp = /^latest(?:-(\d+))?$/;
+
+export function latestImageOffset(fileId: string): number | null {
+  const match = LATEST_IMAGE_PATTERN.exec(fileId);
+  if (!match) {
+    return null;
+  }
+  return match[1] ? Number(match[1]) : 0;
+}
 
 const markdownImagePattern = /(!\[[^\]]*\]\()lc-file:([^)]+)(\))/g;
 

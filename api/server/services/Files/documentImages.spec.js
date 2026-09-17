@@ -239,4 +239,45 @@ describe('resolveDocumentToolImages', () => {
     ).resolves.toBe(httpsArguments);
     expect(getFiles).not.toHaveBeenCalled();
   });
+
+  it('resolves latest-1 to the second newest generated image', async () => {
+    getFiles.mockResolvedValue([
+      {
+        user: user.id,
+        file_id: 'file_new',
+        filepath: '/images/user-1/new.png',
+        type: 'image/png',
+        source: 'local',
+        context: 'image_generation',
+        bytes: 3,
+      },
+      {
+        user: user.id,
+        file_id: 'file_old',
+        filepath: '/images/user-1/old.png',
+        type: 'image/png',
+        source: 'local',
+        context: 'image_generation',
+        bytes: 3,
+      },
+    ]);
+    mockGetDownloadStream.mockImplementation(async (_req, filepath) => {
+      if (filepath.includes('new')) {
+        return Readable.from([Buffer.from('new')]);
+      }
+      return Readable.from([Buffer.from('old')]);
+    });
+
+    const result = await resolveDocumentToolImages({
+      serverName: 'documents',
+      toolName: 'create_pdf',
+      toolArguments: { blocks: [{ type: 'image', src: 'lc-file:latest-1' }] },
+      req,
+      user,
+    });
+
+    expect(result.blocks[0].src).toBe(
+      `data:image/png;base64,${Buffer.from('old').toString('base64')}`,
+    );
+  });
 });

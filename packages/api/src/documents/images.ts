@@ -182,21 +182,48 @@ async function fetchHttpImage(src: string, deps: ImageLoaderDeps): Promise<Buffe
 
 async function normalizeImage(data: Buffer): Promise<{ data: Buffer; format: ImageFormat }> {
   try {
-    return { data, format: detectImageFormat(data) };
+    const format = detectImageFormat(data);
+    return compressForPrint(data, format);
   } catch {
     try {
       const converted = await sharp(data, { failOn: 'error', limitInputPixels: 40_000_000 })
-        .resize({ width: 2400, height: 2400, fit: 'inside', withoutEnlargement: true })
-        .png()
+        .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 78 })
         .toBuffer();
       if (converted.length === 0 || converted.length > MAX_IMAGE_BYTES) {
         throw new Error('Konvertiertes Bild ist leer oder größer als 2 MB');
       }
-      return { data: converted, format: 'png' };
+      return { data: converted, format: 'jpg' };
     } catch {
       throw new Error('Nur gültige PNG-, JPEG-, WebP- und SVG-Bilder werden unterstützt');
     }
   }
+}
+
+async function compressForPrint(
+  data: Buffer,
+  format: ImageFormat,
+): Promise<{ data: Buffer; format: ImageFormat }> {
+  try {
+    const compressed = await sharp(data, { failOn: 'error', limitInputPixels: 40_000_000 })
+      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 78 })
+      .toBuffer();
+    if (compressed.length === 0 || compressed.length > MAX_IMAGE_BYTES) {
+      return { data, format };
+    }
+    if (compressed.length < data.length || data.length > 400_000) {
+      return { data: compressed, format: 'jpg' };
+    }
+    return { data, format };
+  } catch {
+    return { data, format };
+  }
+}
+
+export function imageDataUri(data: Buffer, format: ImageFormat): string {
+  const mime = format === 'jpg' ? 'image/jpeg' : 'image/png';
+  return `data:${mime};base64,${data.toString('base64')}`;
 }
 
 export async function loadImageSource(
@@ -205,18 +232,22 @@ export async function loadImageSource(
   alt: string | undefined,
   align: Alignment | undefined,
   deps: ImageLoaderDeps = defaultDeps,
+  caption?: string,
 ): Promise<PreparedImage> {
   const input = src.startsWith('data:') ? parseDataUri(src) : await fetchHttpImage(src, deps);
   const { data, format } = await normalizeImage(input);
   const size = readImageSize(data, format);
   const width = Math.min(Math.max(widthMm ?? DEFAULT_IMAGE_WIDTH_MM, 10), 190);
   const ratio = size.height > 0 ? size.width / size.height : 1.5;
+  const altText = alt?.trim() || 'Bild';
   return {
     data,
     format,
+    dataUri: imageDataUri(data, format),
     widthMm: width,
     heightMm: width / ratio,
-    alt: alt?.trim() || 'Bild',
+    alt: altText,
+    caption: caption?.trim() || altText,
     align: align ?? 'left',
   };
 }
@@ -238,7 +269,14 @@ export async function loadBlockImages(
     }
     images.set(
       index,
-      await loadImageSource(block.src, block.widthMm, block.alt, block.align, deps),
+      await loadImageSource(
+        block.src,
+        block.widthMm,
+        block.alt,
+        block.align,
+        deps,
+        block.caption,
+      ),
     );
   }
   return images;

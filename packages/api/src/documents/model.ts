@@ -2,6 +2,7 @@ export type Alignment = 'left' | 'center' | 'right' | 'justify';
 export type PageSizeName = 'A4' | 'Letter';
 export type Orientation = 'portrait' | 'landscape';
 export type ImageFormat = 'png' | 'jpg';
+export type DocumentTheme = 'whitepaper' | 'report' | 'plain';
 export type CellValue = string | number | boolean | null;
 
 export interface DocumentLayout {
@@ -15,6 +16,8 @@ export interface DocumentLayout {
   };
   header?: string;
   footer?: string;
+  subtitle?: string;
+  theme?: DocumentTheme;
   backgroundColor?: string;
   defaultFont?: string;
   defaultFontSize?: number;
@@ -64,8 +67,26 @@ export interface ImageBlock {
   type: 'image';
   src: string;
   alt?: string;
+  caption?: string;
   widthMm?: number;
   align?: Alignment;
+}
+
+export interface ChecklistBlock {
+  type: 'checklist';
+  items: string[];
+  checked?: boolean[];
+  style?: TextStyle;
+}
+
+export interface CalloutBlock {
+  type: 'callout';
+  text: string;
+  title?: string;
+}
+
+export interface PageBreakBlock {
+  type: 'pageBreak';
 }
 
 export interface SpacerBlock {
@@ -83,6 +104,9 @@ export type ContentBlock =
   | ListBlock
   | TableBlock
   | ImageBlock
+  | ChecklistBlock
+  | CalloutBlock
+  | PageBreakBlock
   | SpacerBlock
   | RuleBlock;
 
@@ -106,6 +130,8 @@ export interface ResolvedLayout {
   marginsMm: { top: number; right: number; bottom: number; left: number };
   header: string;
   footer: string;
+  subtitle: string;
+  theme: DocumentTheme;
   backgroundColor: string | null;
   defaultFont: string;
   defaultFontSize: number;
@@ -117,9 +143,11 @@ export interface ResolvedLayout {
 export interface PreparedImage {
   data: Buffer;
   format: ImageFormat;
+  dataUri: string;
   widthMm: number;
   heightMm: number;
   alt: string;
+  caption: string;
   align: Alignment;
 }
 
@@ -175,6 +203,8 @@ export function resolveLayout(layout: DocumentLayout | undefined): ResolvedLayou
     },
     header: layout?.header?.trim() ?? '',
     footer: layout?.footer?.trim() ?? '',
+    subtitle: layout?.subtitle?.trim() ?? '',
+    theme: layout?.theme === 'report' || layout?.theme === 'plain' ? layout.theme : 'whitepaper',
     backgroundColor: layout?.backgroundColor
       ? normalizeHex(layout.backgroundColor, '#ffffff')
       : null,
@@ -184,6 +214,18 @@ export function resolveLayout(layout: DocumentLayout | undefined): ResolvedLayou
     accentColor: normalizeHex(layout?.accentColor, '#1f4e79'),
     hideTitle: layout?.hideTitle === true,
   };
+}
+
+function isStructuredMarkdown(trimmed: string): boolean {
+  return (
+    /^!\[/.test(trimmed) ||
+    /^#{1,3}\s+/.test(trimmed) ||
+    /^(-{3,}|\*{3,}|_{3,})$/.test(trimmed) ||
+    trimmed.includes('|') ||
+    /^[-*]\s+\[[ xX]\]\s+/.test(trimmed) ||
+    /^[-*]\s+/.test(trimmed) ||
+    /^\d+\.\s+/.test(trimmed)
+  );
 }
 
 export function parseMarkdownBlocks(content: string): ContentBlock[] {
@@ -199,7 +241,7 @@ export function parseMarkdownBlocks(content: string): ContentBlock[] {
 
     const image = /^!\[([^\]]*)\]\(([^)]+)\)/.exec(trimmed);
     if (image) {
-      blocks.push({ type: 'image', alt: image[1], src: image[2].trim() });
+      blocks.push({ type: 'image', alt: image[1], src: image[2].trim(), caption: image[1] });
       continue;
     }
 
@@ -231,13 +273,35 @@ export function parseMarkdownBlocks(content: string): ContentBlock[] {
       }
     }
 
+    if (/^[-*]\s+\[[ xX]\]\s+/.test(trimmed)) {
+      const items: string[] = [];
+      const checked: boolean[] = [];
+      const first = /^[-*]\s+\[([ xX])\]\s+(.*)$/.exec(trimmed);
+      if (first) {
+        checked.push(first[1].toLowerCase() === 'x');
+        items.push(first[2]);
+      }
+      while (index + 1 < lines.length) {
+        const next = lines[index + 1].trim();
+        const item = /^[-*]\s+\[([ xX])\]\s+(.*)$/.exec(next);
+        if (!item) {
+          break;
+        }
+        index += 1;
+        checked.push(item[1].toLowerCase() === 'x');
+        items.push(item[2]);
+      }
+      blocks.push({ type: 'checklist', items, checked });
+      continue;
+    }
+
     if (/^[-*]\s+/.test(trimmed) || /^\d+\.\s+/.test(trimmed)) {
       const ordered = /^\d+\.\s+/.test(trimmed);
       const items = [trimmed.replace(/^([-*]|\d+\.)\s+/, '')];
       while (index + 1 < lines.length) {
         const next = lines[index + 1].trim();
         const nextOrdered = /^\d+\.\s+/.test(next);
-        const nextBullet = /^[-*]\s+/.test(next);
+        const nextBullet = /^[-*]\s+/.test(next) && !/^[-*]\s+\[[ xX]\]\s+/.test(next);
         if ((ordered && nextOrdered) || (!ordered && nextBullet)) {
           index += 1;
           items.push(next.replace(/^([-*]|\d+\.)\s+/, ''));
@@ -249,7 +313,16 @@ export function parseMarkdownBlocks(content: string): ContentBlock[] {
       continue;
     }
 
-    blocks.push({ type: 'paragraph', text: trimmed });
+    const paraLines = [trimmed];
+    while (index + 1 < lines.length) {
+      const next = lines[index + 1].trim();
+      if (!next || isStructuredMarkdown(next)) {
+        break;
+      }
+      index += 1;
+      paraLines.push(next);
+    }
+    blocks.push({ type: 'paragraph', text: paraLines.join(' ') });
   }
 
   return blocks;

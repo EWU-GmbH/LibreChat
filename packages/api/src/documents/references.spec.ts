@@ -1,6 +1,7 @@
 import {
   hasDocumentImageReferences,
   LATEST_LIBRECHAT_IMAGE,
+  latestImageOffset,
   resolveDocumentImageReferences,
 } from './references';
 
@@ -61,5 +62,12 @@ describe('document image references', () => {
     expect(hasDocumentImageReferences(input)).toBe(false);
     await expect(resolveDocumentImageReferences(input, resolver)).resolves.toBe(input);
     expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it('parses latest-N offsets', () => {
+    expect(latestImageOffset('latest')).toBe(0);
+    expect(latestImageOffset('latest-0')).toBe(0);
+    expect(latestImageOffset('latest-2')).toBe(2);
+    expect(latestImageOffset('file_123')).toBeNull();
   });
 });
