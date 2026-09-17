@@ -5,8 +5,8 @@ import type {
   PreparedImage,
   ResolvedLayout,
 } from './model';
-import { loadBlockImages } from './images';
 import { pageSizeMm, resolveBlocks, resolveLayout } from './model';
+import { loadBlockImages } from './images';
 
 function escapeHtml(value: string): string {
   return value

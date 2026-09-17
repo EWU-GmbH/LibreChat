@@ -2,10 +2,10 @@ import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import type { Alignment, DocumentInput, ResolvedLayout, SheetInput, TextStyle } from './model';
 import { hexForDocx, mapPdfFont, mmToPt, pageSizeMm, resolveBlocks, resolveLayout } from './model';
-import { loadBlockImages } from './images';
-import { htmlToDocx } from './htmlToDocx';
 import { renderPdfViaService } from './pdfClient';
 import { renderPrintHtml } from './printHtml';
+import { loadBlockImages } from './images';
+import { htmlToDocx } from './htmlToDocx';
 
 export type { CellValue, SheetInput } from './model';
 

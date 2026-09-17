@@ -1,3 +1,4 @@
+import { load } from 'cheerio';
 import {
   AlignmentType,
   BorderStyle,
@@ -20,7 +21,6 @@ import {
   WidthType,
   convertMillimetersToTwip,
 } from 'docx';
-import { load } from 'cheerio';
 import { hexForDocx } from './model';
 
 type CheerioAPI = ReturnType<typeof load>;
