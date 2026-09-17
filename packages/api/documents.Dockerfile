@@ -4,7 +4,8 @@ WORKDIR /app
 
 COPY packages/api/documents/package.json packages/api/documents/package-lock.json ./
 
-RUN npm ci --omit=dev
+RUN npm install --global npm@10.9.4 \
+  && npm ci --omit=dev --no-audit --no-fund
 
 ENV NODE_ENV=production
 ENV PORT=3000
