@@ -673,7 +673,9 @@ const setAuthTokens = async (userId, res, _session = null, req = null) => {
 
     const sessionExpiry = math(process.env.SESSION_EXPIRY, DEFAULT_SESSION_EXPIRY);
     const token = await generateToken(user, sessionExpiry);
-    await updateUser(userId, { lastLoginAt: new Date() });
+    await updateUser(userId, { lastLoginAt: new Date() }).catch((error) =>
+      logger.warn('[setAuthTokens] Failed to update last login timestamp', error),
+    );
 
     res.cookie('refreshToken', refreshToken, {
       expires: new Date(refreshTokenExpires),

@@ -907,9 +907,10 @@ async function getMCPSetupData(userId, options = {}) {
 
   const appConfig = await getAppConfig({ role, tenantId, userId });
   const configServers = await registry.ensureConfigServers(appConfig?.mcpConfig || {});
-  const mcpConfig = role
+  const resolvedConfig = role
     ? await registry.getAllServerConfigs(userId, configServers, role)
     : await registry.getAllServerConfigs(userId, configServers);
+  const mcpConfig = filterMCPServersForUser(resolvedConfig, options);
   const mcpManager = getMCPManager(userId);
   /** @type {Map<string, import('@librechat/api').MCPConnection>} */
   let appConnections = new Map();

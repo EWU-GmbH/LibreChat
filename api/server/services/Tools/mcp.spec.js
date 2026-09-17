@@ -31,6 +31,30 @@ jest.mock('~/cache', () => ({
 
 const { reinitMCPServer } = require('./mcp');
 
+describe('reinitMCPServer — per-user access', () => {
+  it('rejects a crafted request for a server outside the user allowlist', async () => {
+    const result = await reinitMCPServer({
+      user: {
+        id: 'restricted-user',
+        role: 'USER',
+        mcpAccess: { policy: 'allowlist', servers: [] },
+      },
+      serverName: 'Thingy',
+      serverConfig: {
+        type: 'streamable-http',
+        url: 'https://thingy.example.com/mcp',
+      },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      availableTools: null,
+      serverName: 'Thingy',
+    });
+    expect(mockGetConnection).not.toHaveBeenCalled();
+  });
+});
+
 describe('reinitMCPServer — customUserVars gating (issue #10969)', () => {
   const user = { id: 'user-123' };
   const serverName = 'Thingy';

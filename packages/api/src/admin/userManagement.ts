@@ -286,13 +286,19 @@ export function createAdminUserManagementHandlers(deps: AdminUserManagementDeps)
       }
 
       const appName = process.env.APP_TITLE || 'LibreChat';
-      const inviteLink = `${process.env.DOMAIN_CLIENT}/register?token=${token}`;
-      await deps.sendEmail({
-        email,
-        subject: `Invite to join ${appName}!`,
-        payload: { appName, inviteLink, year: new Date().getFullYear() },
-        template: 'inviteUser.handlebars',
-      });
+      const domain = process.env.DOMAIN_CLIENT || process.env.DOMAIN_SERVER || '';
+      const inviteLink = `${domain}/register?token=${token}`;
+      try {
+        await deps.sendEmail({
+          email,
+          subject: `Invite to join ${appName}!`,
+          payload: { appName, inviteLink, year: new Date().getFullYear() },
+          template: 'inviteUser.handlebars',
+        });
+      } catch (error) {
+        await deps.deleteTokens({ email, type: 'invite' });
+        throw error;
+      }
       const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
       await audit(req, 'auth.user_invited', { name: email }, { expiresInDays: expiryDays });
       return res.status(201).json({ email, expiresAt });
@@ -303,9 +309,7 @@ export function createAdminUserManagementHandlers(deps: AdminUserManagementDeps)
   }
 
   async function revokeInvite(req: ServerRequest, res: Response): Promise<Response> {
-    const email = decodeURIComponent(req.params.email ?? '')
-      .trim()
-      .toLowerCase();
+    const email = (req.params.email ?? '').trim().toLowerCase();
     if (!email) {
       return res.status(400).json({ error: 'Email is required' });
     }

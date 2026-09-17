@@ -250,108 +250,116 @@ export default function AdminUsersPage() {
         </div>
 
         <div className="overflow-hidden rounded-xl border border-border-light bg-surface-primary">
-          {usersQuery.isLoading ? (
+          {usersQuery.isLoading && (
             <div className="flex min-h-48 items-center justify-center gap-2 text-text-secondary">
               <Spinner className="h-5 w-5" />
               {localize('com_admin_users_loading')}
             </div>
-          ) : usersQuery.isError ? (
+          )}
+          {!usersQuery.isLoading && usersQuery.isError && (
             <div role="alert" className="p-8 text-center text-red-600">
               {localize('com_admin_users_load_error')}
             </div>
-          ) : usersQuery.data?.users.length === 0 ? (
+          )}
+          {!usersQuery.isLoading && !usersQuery.isError && usersQuery.data?.users.length === 0 && (
             <div className="p-8 text-center text-text-secondary">
               {localize('com_admin_users_empty')}
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] border-collapse text-left text-sm">
-                <thead className="bg-surface-secondary text-text-secondary">
-                  <tr>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      {localize('com_admin_users_name')}
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      {localize('com_admin_users_role')}
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      {localize('com_admin_users_status')}
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      {localize('com_admin_users_last_login')}
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      {localize('com_admin_users_mcp_access')}
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      {localize('com_admin_users_actions')}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {usersQuery.data?.users.map((target) => (
-                    <tr key={target.id} className="border-t border-border-light">
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-text-primary">
-                          {target.name || target.username || target.email}
-                        </div>
-                        <div className="text-xs text-text-secondary">{target.email}</div>
-                      </td>
-                      <td className="px-4 py-3 text-text-secondary">{target.role}</td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={
-                            target.blocked
-                              ? 'rounded-full bg-red-100 px-2 py-1 text-xs text-red-700'
-                              : 'rounded-full bg-green-100 px-2 py-1 text-xs text-green-700'
-                          }
-                        >
-                          {localize(
-                            target.blocked ? 'com_admin_users_blocked' : 'com_admin_users_active',
-                          )}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-text-secondary">
-                        {formatDate(target.lastLoginAt, localize('com_admin_users_never'))}
-                      </td>
-                      <td className="px-4 py-3 text-text-secondary">
-                        {target.role === SystemRoles.ADMIN || target.mcpAccess.policy === 'all'
-                          ? localize('com_admin_users_mcp_all')
-                          : `${target.mcpAccess.servers.length} / ${servers.length}`}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={statusMutation.isLoading || target.id === user?.id}
-                            onClick={() => toggleStatus(target)}
+          )}
+          {!usersQuery.isLoading &&
+            !usersQuery.isError &&
+            usersQuery.data != null &&
+            usersQuery.data.users.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+                  <thead className="bg-surface-secondary text-text-secondary">
+                    <tr>
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        {localize('com_admin_users_name')}
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        {localize('com_admin_users_role')}
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        {localize('com_admin_users_status')}
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        {localize('com_admin_users_last_login')}
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        {localize('com_admin_users_mcp_access')}
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        {localize('com_admin_users_actions')}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usersQuery.data?.users.map((target) => (
+                      <tr key={target.id} className="border-t border-border-light">
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-text-primary">
+                            {target.name || target.username || target.email}
+                          </div>
+                          <div className="text-xs text-text-secondary">{target.email}</div>
+                        </td>
+                        <td className="px-4 py-3 text-text-secondary">{target.role}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={
+                              target.blocked
+                                ? 'rounded-full bg-red-100 px-2 py-1 text-xs text-red-700'
+                                : 'rounded-full bg-green-100 px-2 py-1 text-xs text-green-700'
+                            }
                           >
                             {localize(
-                              target.blocked ? 'com_admin_users_unblock' : 'com_admin_users_block',
+                              target.blocked ? 'com_admin_users_blocked' : 'com_admin_users_active',
                             )}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={target.role === SystemRoles.ADMIN}
-                            onClick={() => {
-                              setAccessUser(target);
-                              setEditedAccess(target.mcpAccess);
-                            }}
-                          >
-                            {localize('com_admin_users_mcp_access')}
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-text-secondary">
+                          {formatDate(target.lastLoginAt, localize('com_admin_users_never'))}
+                        </td>
+                        <td className="px-4 py-3 text-text-secondary">
+                          {target.role === SystemRoles.ADMIN || target.mcpAccess.policy === 'all'
+                            ? localize('com_admin_users_mcp_all')
+                            : `${target.mcpAccess.servers.length} / ${servers.length}`}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={statusMutation.isLoading || target.id === user?.id}
+                              onClick={() => toggleStatus(target)}
+                            >
+                              {localize(
+                                target.blocked
+                                  ? 'com_admin_users_unblock'
+                                  : 'com_admin_users_block',
+                              )}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={target.role === SystemRoles.ADMIN}
+                              onClick={() => {
+                                setAccessUser(target);
+                                setEditedAccess(target.mcpAccess);
+                              }}
+                            >
+                              {localize('com_admin_users_mcp_access')}
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
         </div>
 
         <nav

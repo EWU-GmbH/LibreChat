@@ -1,6 +1,16 @@
 import type { AxiosResponse } from 'axios';
 import type { TContextProjectionRequest, TContextUsageEvent } from './types/runs';
 import type { TFileConfig } from './file-config';
+import type {
+  AdminInviteUserRequest,
+  AdminInviteUserResponse,
+  AdminMCPServersResponse,
+  AdminUpdateMCPAccessRequest,
+  AdminUpdateUserStatusRequest,
+  AdminUser,
+  AdminUsersPage,
+  AdminUsersParams,
+} from './types/admin';
 import type * as t from './types';
 import * as permissions from './accessPermissions';
 import * as endpoints from './api-endpoints';
@@ -16,7 +26,7 @@ import request from './request';
 import * as s from './schemas';
 import * as r from './roles';
 
-export function getAdminUsers(params: t.AdminUsersParams): Promise<t.AdminUsersPage> {
+export function getAdminUsers(params: AdminUsersParams): Promise<AdminUsersPage> {
   const query = new URLSearchParams();
   if (params.cursor) {
     query.set('cursor', params.cursor);
@@ -31,13 +41,11 @@ export function getAdminUsers(params: t.AdminUsersParams): Promise<t.AdminUsersP
   return request.get(`${endpoints.adminUsers()}${suffix}`);
 }
 
-export function getAdminMCPServers(): Promise<t.AdminMCPServersResponse> {
+export function getAdminMCPServers(): Promise<AdminMCPServersResponse> {
   return request.get(endpoints.adminUserMCPServers());
 }
 
-export function inviteAdminUser(
-  payload: t.AdminInviteUserRequest,
-): Promise<t.AdminInviteUserResponse> {
+export function inviteAdminUser(payload: AdminInviteUserRequest): Promise<AdminInviteUserResponse> {
   return request.post(endpoints.adminUserInvites(), payload);
 }
 
@@ -47,15 +55,15 @@ export function revokeAdminUserInvite(email: string): Promise<{ success: boolean
 
 export function updateAdminUserStatus(
   userId: string,
-  payload: t.AdminUpdateUserStatusRequest,
-): Promise<{ user: t.AdminUser }> {
+  payload: AdminUpdateUserStatusRequest,
+): Promise<{ user: AdminUser }> {
   return request.patch(endpoints.adminUserStatus(userId), payload);
 }
 
 export function updateAdminUserMCPAccess(
   userId: string,
-  payload: t.AdminUpdateMCPAccessRequest,
-): Promise<{ user: t.AdminUser }> {
+  payload: AdminUpdateMCPAccessRequest,
+): Promise<{ user: AdminUser }> {
   return request.put(endpoints.adminUserMCPAccess(userId), payload);
 }
 
