@@ -361,6 +361,26 @@ describe('MCP Tool Authorization', () => {
       expect(result).not.toContain(malformedTool);
     });
 
+    test('should strip MCP tools denied by user mcpAccess allowlist', async () => {
+      mockGetAllServerConfigs.mockResolvedValue({
+        dataforseo: { type: 'sse', url: 'https://dataforseo.example.com' },
+        listmonk: { type: 'sse', url: 'https://listmonk.example.com' },
+      });
+
+      const result = await filterAuthorizedTools({
+        tools: [`docs${d}dataforseo`, `campaigns${d}listmonk`, 'web_search'],
+        userId,
+        user: {
+          id: userId,
+          role: 'USER',
+          mcpAccess: { policy: 'allowlist', servers: ['dataforseo'] },
+        },
+        availableTools,
+      });
+
+      expect(result).toEqual([`docs${d}dataforseo`, 'web_search']);
+    });
+
     test('should gate app-level MCP tools present in the global tool cache', async () => {
       const appMcpTool = `appTool${d}authorizedServer`;
       const forbiddenAppMcpTool = `appTool${d}forbiddenServer`;

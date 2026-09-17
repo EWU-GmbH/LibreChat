@@ -7,10 +7,11 @@ import {
   appendAgentIdSuffix,
   encodeEphemeralAgentId,
 } from 'librechat-data-provider';
-import type { Agent, TConversation, TModelSpec } from 'librechat-data-provider';
+import type { Agent, TConversation, TModelSpec, UserMCPAccess } from 'librechat-data-provider';
 import type { AppConfig } from '@librechat/data-schemas';
 import { requiresEphemeralUserConnection } from '~/mcp/utils';
 import { getCustomEndpointConfig } from '~/app/config';
+import { canAccessMCPServer } from '~/mcp/access';
 
 const { mcp_all, mcp_delimiter } = Constants;
 
@@ -181,8 +182,17 @@ export async function loadAddedAgent(
   }
 
   const addedServers = new Set<string>();
+  const accessUser = req.user as
+    | { id?: string; role?: string; mcpAccess?: UserMCPAccess }
+    | undefined;
   for (const mcpServer of mcpServers) {
     if (addedServers.has(mcpServer)) {
+      continue;
+    }
+    if (!canAccessMCPServer(accessUser, mcpServer)) {
+      logger.warn(
+        `[loadAddedAgent] Denied MCP server '${mcpServer}' for user ${userId} (mcpAccess policy)`,
+      );
       continue;
     }
     /** Request-tier overlays are invisible to the cache service's registry

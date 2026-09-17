@@ -9,12 +9,14 @@ import {
 import type {
   AgentModelParameters,
   TEphemeralAgent,
+  UserMCPAccess,
   TModelSpec,
   Agent,
 } from 'librechat-data-provider';
 import type { AppConfig } from '@librechat/data-schemas';
 import { requiresEphemeralUserConnection } from '~/mcp/utils';
 import { getCustomEndpointConfig } from '~/app/config';
+import { canAccessMCPServer } from '~/mcp/access';
 
 const { mcp_all, mcp_delimiter } = Constants;
 type ModelParametersWithPromptPrefix = AgentModelParameters & { promptPrefix?: string | null };
@@ -29,7 +31,7 @@ export interface LoadAgentDeps {
 
 export interface LoadAgentParams {
   req: {
-    user?: { id?: string };
+    user?: { id?: string; role?: string; mcpAccess?: UserMCPAccess };
     config?: AppConfig;
     body?: {
       promptPrefix?: string;
@@ -51,6 +53,13 @@ async function getSelectedMCPTools(
   const userId = req.user?.id ?? '';
 
   for (const serverName of new Set(serverNames)) {
+    if (!canAccessMCPServer(req.user, serverName)) {
+      logger.warn(
+        `[getSelectedMCPTools] Denied MCP server '${serverName}' for user ${userId} (mcpAccess policy)`,
+      );
+      continue;
+    }
+
     const overlayConfig = req.config?.mcpConfig?.[serverName];
     const serverTools =
       overlayConfig && requiresEphemeralUserConnection(overlayConfig)

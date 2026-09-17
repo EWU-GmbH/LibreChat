@@ -442,6 +442,15 @@ export const skillStates = () => `${BASE_URL}/api/user/settings/skills/active`;
 /* Roles */
 export const roles = () => `${BASE_URL}/api/roles`;
 export const adminRoles = () => `${BASE_URL}/api/admin/roles`;
+export const adminUsers = () => `${BASE_URL}/api/admin/users`;
+export const adminUserStatus = (userId: string) =>
+  `${adminUsers()}/${encodeURIComponent(userId)}/status`;
+export const adminUserMCPAccess = (userId: string) =>
+  `${adminUsers()}/${encodeURIComponent(userId)}/mcp-access`;
+export const adminUserInvites = () => `${adminUsers()}/invites`;
+export const adminUserInvite = (email: string) =>
+  `${adminUserInvites()}/${encodeURIComponent(email)}`;
+export const adminUserMCPServers = () => `${adminUsers()}/mcp-servers`;
 export const getRole = (roleName: string) => `${roles()}/${encodeURIComponent(roleName)}`;
 export const updatePromptPermissions = (roleName: string) => `${getRole(roleName)}/prompts`;
 export const updateMemoryPermissions = (roleName: string) => `${getRole(roleName)}/memories`;

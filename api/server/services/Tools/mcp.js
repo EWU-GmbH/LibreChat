@@ -1,5 +1,9 @@
 const { logger } = require('@librechat/data-schemas');
-const { getMissingCustomUserVars, requiresEphemeralUserConnection } = require('@librechat/api');
+const {
+  canAccessMCPServer,
+  getMissingCustomUserVars,
+  requiresEphemeralUserConnection,
+} = require('@librechat/api');
 const { CacheKeys, Constants } = require('librechat-data-provider');
 const { getMCPManager, getMCPServersRegistry, getFlowStateManager } = require('~/config');
 const { findToken, createToken, updateToken, deleteTokens } = require('~/models');
@@ -55,6 +59,19 @@ async function reinitMCPServer({
   let ephemeralServer = false;
 
   try {
+    if (!canAccessMCPServer(user, serverName)) {
+      logger.warn(`[MCP Reinitialize] User ${user?.id} denied access to server ${serverName}`);
+      return {
+        availableTools: null,
+        success: false,
+        message: `MCP server '${serverName}' is not available`,
+        oauthRequired: false,
+        serverName,
+        oauthUrl: null,
+        tools: null,
+      };
+    }
+
     const registry = getMCPServersRegistry();
     serverConfig =
       serverConfig ?? (await registry.getServerConfig(serverName, user?.id, configServers));

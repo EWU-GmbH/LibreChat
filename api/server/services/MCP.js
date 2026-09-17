@@ -21,6 +21,8 @@ const {
   checkAccessWithRequestCache,
   requiresEphemeralUserConnection,
   containsGraphTokenPlaceholder,
+  filterMCPServersForUser,
+  canAccessMCPServer,
 } = require('@librechat/api');
 const {
   Time,
@@ -121,7 +123,8 @@ async function resolveConfigServers(req) {
   try {
     const registry = getMCPServersRegistry();
     const appConfig = await getAppConfigForRequest(req);
-    return await registry.ensureConfigServers(appConfig?.mcpConfig || {});
+    const servers = await registry.ensureConfigServers(appConfig?.mcpConfig || {});
+    return filterMCPServersForUser(servers, req?.user);
   } catch (error) {
     logger.warn(
       '[resolveConfigServers] Failed to resolve config servers, degrading to empty:',
@@ -162,11 +165,10 @@ async function resolveAllMcpConfigs(userId, user) {
       error,
     );
   }
-  if (user?.role) {
-    return await registry.getAllServerConfigs(userId, configServers, user.role);
-  }
-
-  return await registry.getAllServerConfigs(userId, configServers);
+  const servers = user?.role
+    ? await registry.getAllServerConfigs(userId, configServers, user.role)
+    : await registry.getAllServerConfigs(userId, configServers);
+  return filterMCPServersForUser(servers, user);
 }
 
 function getServerCustomUserVars(userMCPAuthMap, serverName) {
@@ -529,6 +531,11 @@ async function createMCPTools({
   requestScopedConnections,
   streamId = null,
 }) {
+  if (!canAccessMCPServer(user, serverName)) {
+    logger.warn(`[MCP][${serverName}] Denied by mcpAccess policy for user ${user?.id}`);
+    return [];
+  }
+
   const serverConfig =
     config ?? (await getMCPServersRegistry().getServerConfig(serverName, user?.id, configServers));
 
@@ -639,6 +646,11 @@ async function createMCPTool({
   streamId = null,
 }) {
   const [toolName, serverName] = toolKey.split(Constants.mcp_delimiter);
+
+  if (!canAccessMCPServer(user, serverName)) {
+    logger.warn(`[MCP][${serverName}] Denied by mcpAccess policy for user ${user?.id}`);
+    return;
+  }
 
   const serverConfig =
     config ?? (await getMCPServersRegistry().getServerConfig(serverName, user?.id, configServers));
@@ -783,6 +795,9 @@ function createToolInstance({
       if (!canUseMCP) {
         throw new Error('Forbidden: Insufficient MCP server permissions');
       }
+      if (!canAccessMCPServer(permissionUser, serverName)) {
+        throw new Error(`Forbidden: MCP server '${serverName}' is not available`);
+      }
       const flowsCache = getLogStores(CacheKeys.FLOWS);
       const flowManager = getFlowStateManager(flowsCache);
       derivedSignal = config?.signal ? AbortSignal.any([config.signal]) : undefined;
@@ -906,9 +921,10 @@ async function getMCPSetupData(userId, options = {}) {
 
   const appConfig = await getAppConfig({ role, tenantId, userId });
   const configServers = await registry.ensureConfigServers(appConfig?.mcpConfig || {});
-  const mcpConfig = role
+  const resolvedConfig = role
     ? await registry.getAllServerConfigs(userId, configServers, role)
     : await registry.getAllServerConfigs(userId, configServers);
+  const mcpConfig = filterMCPServersForUser(resolvedConfig, options);
   const mcpManager = getMCPManager(userId);
   /** @type {Map<string, import('@librechat/api').MCPConnection>} */
   let appConnections = new Map();

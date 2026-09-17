@@ -44,7 +44,17 @@ const OPENID_REUSE_MAX_SESSION_AGE_MS = math(
 
 const registrationController = async (req, res) => {
   try {
-    const response = await registerUser(req.body);
+    const rawAccess =
+      req.invite?.metadata instanceof Map
+        ? req.invite.metadata.get('mcpAccess')
+        : req.invite?.metadata?.mcpAccess;
+    const mcpAccess =
+      rawAccess &&
+      (rawAccess.policy === 'all' || rawAccess.policy === 'allowlist') &&
+      Array.isArray(rawAccess.servers)
+        ? { policy: rawAccess.policy, servers: rawAccess.servers }
+        : undefined;
+    const response = await registerUser(req.body, mcpAccess ? { mcpAccess } : {});
     const { status, message } = response;
     res.status(status).send({ message });
   } catch (err) {

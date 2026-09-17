@@ -1,4 +1,14 @@
 import type { AxiosResponse } from 'axios';
+import type {
+  AdminInviteUserRequest,
+  AdminInviteUserResponse,
+  AdminMCPServersResponse,
+  AdminUpdateMCPAccessRequest,
+  AdminUpdateUserStatusRequest,
+  AdminUser,
+  AdminUsersPage,
+  AdminUsersParams,
+} from './types/admin';
 import type { TContextProjectionRequest, TContextUsageEvent } from './types/runs';
 import type { TFileConfig } from './file-config';
 import type * as t from './types';
@@ -15,6 +25,47 @@ import * as config from './config';
 import request from './request';
 import * as s from './schemas';
 import * as r from './roles';
+
+export function getAdminUsers(params: AdminUsersParams): Promise<AdminUsersPage> {
+  const query = new URLSearchParams();
+  if (params.cursor) {
+    query.set('cursor', params.cursor);
+  }
+  if (params.limit) {
+    query.set('limit', String(params.limit));
+  }
+  if (params.search) {
+    query.set('search', params.search);
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return request.get(`${endpoints.adminUsers()}${suffix}`);
+}
+
+export function getAdminMCPServers(): Promise<AdminMCPServersResponse> {
+  return request.get(endpoints.adminUserMCPServers());
+}
+
+export function inviteAdminUser(payload: AdminInviteUserRequest): Promise<AdminInviteUserResponse> {
+  return request.post(endpoints.adminUserInvites(), payload);
+}
+
+export function revokeAdminUserInvite(email: string): Promise<{ success: boolean }> {
+  return request.delete(endpoints.adminUserInvite(email));
+}
+
+export function updateAdminUserStatus(
+  userId: string,
+  payload: AdminUpdateUserStatusRequest,
+): Promise<{ user: AdminUser }> {
+  return request.patch(endpoints.adminUserStatus(userId), payload);
+}
+
+export function updateAdminUserMCPAccess(
+  userId: string,
+  payload: AdminUpdateMCPAccessRequest,
+): Promise<{ user: AdminUser }> {
+  return request.put(endpoints.adminUserMCPAccess(userId), payload);
+}
 
 export function revokeUserKey(name: string): Promise<unknown> {
   return request.delete(endpoints.revokeUserKey(name));

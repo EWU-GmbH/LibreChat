@@ -65,6 +65,36 @@ const userSchema: Schema<IUser> = new Schema<IUser>(
       type: String,
       default: SystemRoles.USER,
     },
+    blocked: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    blockedAt: {
+      type: Date,
+    },
+    blockedBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    lastLoginAt: {
+      type: Date,
+    },
+    mcpAccess: {
+      type: {
+        policy: {
+          type: String,
+          enum: ['all', 'allowlist'],
+          required: true,
+        },
+        servers: {
+          type: [String],
+          default: [],
+        },
+      },
+      required: false,
+      _id: false,
+    },
     googleId: {
       type: String,
     },

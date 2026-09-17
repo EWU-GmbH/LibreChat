@@ -13,6 +13,8 @@ const {
   collectToolResourceFileIds,
   convertOcrToContextInPlace,
   stripFileIdsFromToolResources,
+  canAccessMCPServer,
+  filterMCPServersForUser,
 } = require('@librechat/api');
 const {
   Time,
@@ -244,10 +246,11 @@ const filterAuthorizedTools = async ({
 
     if (mcpServerConfigs === undefined) {
       try {
-        mcpServerConfigs =
+        const resolvedConfigs =
           (role
             ? await getMCPServersRegistry().getAllServerConfigs(userId, configServers, role)
             : await getMCPServersRegistry().getAllServerConfigs(userId, configServers)) ?? {};
+        mcpServerConfigs = filterMCPServersForUser(resolvedConfigs, user);
       } catch (e) {
         logger.warn(
           '[filterAuthorizedTools] MCP registry unavailable, filtering all MCP tools',
@@ -272,7 +275,11 @@ const filterAuthorizedTools = async ({
     }
 
     const [, serverName] = parts;
-    if (!serverName || !Object.hasOwn(mcpServerConfigs, serverName)) {
+    if (
+      !serverName ||
+      !Object.hasOwn(mcpServerConfigs, serverName) ||
+      !canAccessMCPServer(user, serverName)
+    ) {
       logger.warn(
         `[filterAuthorizedTools] Rejected MCP tool "${tool}" — server "${serverName}" not accessible to user ${userId}`,
       );

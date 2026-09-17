@@ -1298,6 +1298,18 @@ describe('CloudFront cookie integration', () => {
       );
     });
 
+    it('rejects blocked users before creating a session', async () => {
+      getUserById.mockResolvedValue({ _id: 'blocked-user', blocked: true });
+      const res = mockResponse();
+
+      await expect(setAuthTokens('blocked-user', res)).rejects.toThrow(
+        'This account has been blocked.',
+      );
+
+      expect(createSession).not.toHaveBeenCalled();
+      expect(generateToken).not.toHaveBeenCalled();
+    });
+
     it('succeeds even when setCloudFrontCookies returns false', async () => {
       setCloudFrontCookies.mockReturnValue(false);
 

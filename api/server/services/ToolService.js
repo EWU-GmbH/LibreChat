@@ -28,6 +28,7 @@ const {
   buildMCPAuthRunStepDeltaEvent,
   buildMCPAuthRunStepCompletedEvent,
   isFileAuthoringToolDefinition,
+  canAccessMCPServer,
 } = require('@librechat/api');
 const {
   Time,
@@ -720,6 +721,13 @@ async function loadToolDefinitionsWrapper({ req, res, agent, streamId = null, to
       pendingOAuthStarts.set(serverName, pendingOAuthStart);
       return true;
     };
+
+    if (!canAccessMCPServer(req.user, serverName)) {
+      logger.warn(
+        `[Tool Definitions] Denied MCP server '${serverName}' for user ${userId} (mcpAccess policy)`,
+      );
+      return null;
+    }
 
     let serverConfig;
     try {

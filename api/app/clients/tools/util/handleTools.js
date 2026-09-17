@@ -9,6 +9,7 @@ const {
   getCodeApiAuthHeaders,
   buildImageToolContext,
   buildWebSearchContext,
+  canAccessMCPServer,
   buildWebSearchDynamicContext,
 } = require('@librechat/api');
 const {
@@ -371,6 +372,12 @@ const loadTools = async ({
       const [toolName, serverName] = tool.split(Constants.mcp_delimiter);
       if (toolName === Constants.mcp_server) {
         /** Placeholder used for UI purposes */
+        continue;
+      }
+      if (!canAccessMCPServer(options.req?.user, serverName)) {
+        logger.warn(
+          `[handleTools] Denied MCP server "${serverName}" for user ${options.req?.user?.id} (mcpAccess policy)`,
+        );
         continue;
       }
       const serverConfig = serverName
