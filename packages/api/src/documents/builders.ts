@@ -1,318 +1,31 @@
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
-import {
-  BorderStyle,
-  Document,
-  Footer,
-  Header,
-  HeadingLevel,
-  ImageRun,
-  AlignmentType,
-  Packer,
-  PageNumber,
-  PageOrientation,
-  Paragraph,
-  ShadingType,
-  Table,
-  TableCell,
-  TableRow,
-  TextRun,
-  VerticalAlign,
-  WidthType,
-  convertMillimetersToTwip,
-} from 'docx';
-import type {
-  Alignment,
-  ContentBlock,
-  DocumentInput,
-  PreparedImage,
-  ResolvedLayout,
-  SheetInput,
-  TextStyle,
-} from './model';
-import {
-  hexForDocx,
-  mapPdfFont,
-  mmToPt,
-  mmToPx,
-  pageSizeMm,
-  resolveBlocks,
-  resolveLayout,
-} from './model';
+import type { Alignment, DocumentInput, ResolvedLayout, SheetInput, TextStyle } from './model';
+import { hexForDocx, mapPdfFont, mmToPt, pageSizeMm, resolveBlocks, resolveLayout } from './model';
+import { renderPdfViaService } from './pdfClient';
+import { renderPrintHtml } from './printHtml';
 import { loadBlockImages } from './images';
+import { htmlToDocx } from './htmlToDocx';
 
 export type { CellValue, SheetInput } from './model';
 
-const headingLevels = {
-  1: HeadingLevel.HEADING_1,
-  2: HeadingLevel.HEADING_2,
-  3: HeadingLevel.HEADING_3,
-} as const;
-
-function headingSize(level: 1 | 2 | 3, pdf: boolean): number {
+function headingSize(level: 1 | 2 | 3): number {
   if (level === 1) {
-    return pdf ? 16 : 18;
+    return 16;
   }
   if (level === 2) {
-    return pdf ? 13 : 14;
+    return 13;
   }
   return 12;
-}
-
-const alignments: Record<Alignment, (typeof AlignmentType)[keyof typeof AlignmentType]> = {
-  left: AlignmentType.LEFT,
-  center: AlignmentType.CENTER,
-  right: AlignmentType.RIGHT,
-  justify: AlignmentType.JUSTIFIED,
-};
-
-function textRun(
-  text: string,
-  layout: ResolvedLayout,
-  style?: TextStyle,
-  extra?: TextStyle,
-): TextRun {
-  const merged = { ...extra, ...style };
-  return new TextRun({
-    text,
-    font: merged.font ?? layout.defaultFont,
-    size: Math.round((merged.size ?? layout.defaultFontSize) * 2),
-    color: hexForDocx(merged.color ?? layout.defaultColor),
-    bold: merged.bold,
-    italics: merged.italic,
-    underline: merged.underline ? {} : undefined,
-  });
-}
-
-function buildDocxParagraphs(
-  block: ContentBlock,
-  layout: ResolvedLayout,
-  image: PreparedImage | undefined,
-): Paragraph[] | Table {
-  if (block.type === 'heading') {
-    return [
-      new Paragraph({
-        heading: headingLevels[block.level],
-        alignment: alignments[block.align ?? 'left'],
-        children: [
-          textRun(block.text, layout, block.style, {
-            bold: true,
-            color: layout.accentColor,
-            size: headingSize(block.level, false),
-          }),
-        ],
-      }),
-    ];
-  }
-
-  if (block.type === 'paragraph') {
-    return [
-      new Paragraph({
-        alignment: alignments[block.align ?? 'left'],
-        spacing: { after: 160 },
-        children: [textRun(block.text, layout, block.style)],
-      }),
-    ];
-  }
-
-  if (block.type === 'list') {
-    return block.items.map(
-      (item) =>
-        new Paragraph({
-          bullet: block.ordered ? undefined : { level: 0 },
-          numbering: block.ordered ? { reference: 'doc-numbering', level: 0 } : undefined,
-          children: [textRun(item, layout, block.style)],
-        }),
-    );
-  }
-
-  if (block.type === 'table') {
-    const headers = block.headers ?? [];
-    const width = Math.floor(100 / Math.max(headers.length || (block.rows[0]?.length ?? 1), 1));
-    const cell = (value: string, header: boolean) =>
-      new TableCell({
-        width: { size: width, type: WidthType.PERCENTAGE },
-        verticalAlign: VerticalAlign.CENTER,
-        shading: header
-          ? { type: ShadingType.CLEAR, fill: hexForDocx(layout.accentColor) }
-          : undefined,
-        margins: { top: 60, bottom: 60, left: 80, right: 80 },
-        children: [
-          new Paragraph({
-            children: [
-              textRun(value, layout, undefined, {
-                bold: header,
-                color: header ? '#ffffff' : layout.defaultColor,
-              }),
-            ],
-          }),
-        ],
-      });
-
-    const rows = [
-      ...(headers.length
-        ? [new TableRow({ children: headers.map((header) => cell(header, true)) })]
-        : []),
-      ...block.rows.map(
-        (row) => new TableRow({ children: row.map((value) => cell(value, false)) }),
-      ),
-    ];
-    return new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      rows,
-    });
-  }
-
-  if (block.type === 'image') {
-    if (!image) {
-      return [new Paragraph({ children: [textRun(`[Bild fehlt: ${block.alt ?? ''}]`, layout)] })];
-    }
-    return [
-      new Paragraph({
-        alignment: alignments[image.align],
-        spacing: { before: 120, after: 120 },
-        children: [
-          new ImageRun({
-            type: image.format,
-            data: image.data,
-            transformation: {
-              width: mmToPx(image.widthMm),
-              height: mmToPx(image.heightMm),
-            },
-            altText: { title: image.alt, description: image.alt, name: image.alt },
-          }),
-        ],
-      }),
-    ];
-  }
-
-  if (block.type === 'spacer') {
-    return [
-      new Paragraph({
-        spacing: { after: Math.round(clampSpacer(block.heightMm) * 20) },
-        children: [new TextRun('')],
-      }),
-    ];
-  }
-
-  return [
-    new Paragraph({
-      border: {
-        bottom: {
-          color: hexForDocx(layout.accentColor),
-          space: 1,
-          style: BorderStyle.SINGLE,
-          size: 12,
-        },
-      },
-      spacing: { after: 200 },
-      children: [new TextRun('')],
-    }),
-  ];
 }
 
 function clampSpacer(heightMm: number | undefined): number {
   return Math.min(Math.max(heightMm ?? 6, 1), 40);
 }
 
-function titleParagraph(title: string, layout: ResolvedLayout): Paragraph {
-  return new Paragraph({
-    heading: HeadingLevel.TITLE,
-    alignment: AlignmentType.LEFT,
-    spacing: { after: 240 },
-    children: [
-      textRun(title, layout, undefined, {
-        bold: true,
-        size: 26,
-        color: layout.accentColor,
-      }),
-    ],
-  });
-}
-
 export async function createDocx(input: DocumentInput): Promise<Buffer> {
-  const layout = resolveLayout(input.layout);
-  const blocks = resolveBlocks(input);
-  const images = await loadBlockImages(blocks);
-  const page = pageSizeMm(layout);
-  const children: Array<Paragraph | Table> = [];
-
-  if (!layout.hideTitle) {
-    children.push(titleParagraph(input.title, layout));
-  }
-
-  for (let index = 0; index < blocks.length; index += 1) {
-    const rendered = buildDocxParagraphs(blocks[index], layout, images.get(index));
-    if (Array.isArray(rendered)) {
-      children.push(...rendered);
-    } else {
-      children.push(rendered);
-    }
-  }
-
-  const headerParagraph = layout.header
-    ? [
-        new Paragraph({
-          children: [textRun(layout.header, layout, undefined, { size: 9, color: '#666666' })],
-        }),
-      ]
-    : [];
-  const footerParagraph = [
-    new Paragraph({
-      alignment: AlignmentType.RIGHT,
-      children: [
-        textRun(layout.footer ? `${layout.footer} · ` : '', layout, undefined, {
-          size: 9,
-          color: '#666666',
-        }),
-        new TextRun({ children: [PageNumber.CURRENT] }),
-      ],
-    }),
-  ];
-
-  const document = new Document({
-    numbering: {
-      config: [
-        {
-          reference: 'doc-numbering',
-          levels: [
-            {
-              level: 0,
-              format: 'decimal',
-              text: '%1.',
-              alignment: AlignmentType.START,
-            },
-          ],
-        },
-      ],
-    },
-    sections: [
-      {
-        properties: {
-          page: {
-            size: {
-              width: convertMillimetersToTwip(page.width),
-              height: convertMillimetersToTwip(page.height),
-              orientation:
-                layout.orientation === 'landscape'
-                  ? PageOrientation.LANDSCAPE
-                  : PageOrientation.PORTRAIT,
-            },
-            margin: {
-              top: convertMillimetersToTwip(layout.marginsMm.top),
-              right: convertMillimetersToTwip(layout.marginsMm.right),
-              bottom: convertMillimetersToTwip(layout.marginsMm.bottom),
-              left: convertMillimetersToTwip(layout.marginsMm.left),
-            },
-          },
-        },
-        headers: { default: new Header({ children: headerParagraph }) },
-        footers: { default: new Footer({ children: footerParagraph }) },
-        children,
-      },
-    ],
-  });
-  return Packer.toBuffer(document);
+  const html = await renderPrintHtml(input);
+  return htmlToDocx(html);
 }
 
 export async function createXlsx(sheets: SheetInput[]): Promise<Buffer> {
@@ -369,7 +82,11 @@ function pdfAlign(align: Alignment | undefined): 'left' | 'center' | 'right' | '
   return align ?? 'left';
 }
 
-function paintPdfChrome(document: PDFKit.PDFDocument, layout: ResolvedLayout, title: string): void {
+function paintPdfChrome(
+  document: PDFKit.PDFDocument,
+  layout: ResolvedLayout,
+  pageNumber: number,
+): void {
   const page = document.page;
   const cursor = document.y;
   const margins = { ...page.margins };
@@ -390,9 +107,15 @@ function paintPdfChrome(document: PDFKit.PDFDocument, layout: ResolvedLayout, ti
       height: 12,
     });
   }
-  const footer = layout.footer ? `${layout.footer} · ${title}` : title;
+  const footer = layout.footer;
   document.text(footer, margins.left, page.height - 24, {
-    width,
+    width: width / 2,
+    align: 'left',
+    lineBreak: false,
+    height: 12,
+  });
+  document.text(`Seite ${pageNumber}`, margins.left + width / 2, page.height - 24, {
+    width: width / 2,
     align: 'right',
     lineBreak: false,
     height: 12,
@@ -411,8 +134,18 @@ function drawPdfTable(
   const usable = document.page.width - document.page.margins.left - document.page.margins.right;
   const columns = Math.max(headers.length || rows[0]?.length || 1, 1);
   const colWidth = usable / columns;
+  const padding = 5;
+  const fontSize = 10;
   const drawRow = (values: string[], header: boolean) => {
-    const height = 22;
+    document.font(header ? 'Helvetica-Bold' : 'Helvetica').fontSize(fontSize);
+    let height = 18;
+    for (let index = 0; index < columns; index += 1) {
+      const text = values[index] ?? '';
+      height = Math.max(
+        height,
+        document.heightOfString(text, { width: colWidth - padding * 2 }) + padding * 2,
+      );
+    }
     if (document.y + height > document.page.height - document.page.margins.bottom) {
       document.addPage();
     }
@@ -422,14 +155,14 @@ function drawPdfTable(
       document.save();
       if (header) {
         document.rect(x, y, colWidth, height).fill(layout.accentColor);
-        document.fillColor('#ffffff').font('Helvetica-Bold').fontSize(10);
+        document.fillColor('#ffffff').font('Helvetica-Bold').fontSize(fontSize);
       } else {
         document.rect(x, y, colWidth, height).strokeColor('#cccccc').stroke();
-        document.fillColor(layout.defaultColor).font('Helvetica').fontSize(10);
+        document.fillColor(layout.defaultColor).font('Helvetica').fontSize(fontSize);
       }
-      document.text(values[index] ?? '', x + 4, y + 6, {
-        width: colWidth - 8,
-        lineBreak: false,
+      document.text(values[index] ?? '', x + padding, y + padding, {
+        width: colWidth - padding * 2,
+        lineBreak: true,
       });
       document.restore();
     }
@@ -445,7 +178,7 @@ function drawPdfTable(
   document.moveDown(0.6);
 }
 
-export async function createPdf(input: DocumentInput): Promise<Buffer> {
+async function createPdfWithPdfKit(input: DocumentInput): Promise<Buffer> {
   const layout = resolveLayout(input.layout);
   const blocks = resolveBlocks(input);
   const images = await loadBlockImages(blocks);
@@ -467,8 +200,12 @@ export async function createPdf(input: DocumentInput): Promise<Buffer> {
     document.on('data', (chunk: Buffer) => chunks.push(chunk));
     document.on('end', () => resolve(Buffer.concat(chunks)));
     document.on('error', reject);
-    document.on('pageAdded', () => paintPdfChrome(document, layout, input.title));
-    paintPdfChrome(document, layout, input.title);
+    let pageNumber = 1;
+    document.on('pageAdded', () => {
+      pageNumber += 1;
+      paintPdfChrome(document, layout, pageNumber);
+    });
+    paintPdfChrome(document, layout, pageNumber);
 
     if (!layout.hideTitle) {
       applyPdfStyle(document, layout, undefined, {
@@ -477,6 +214,10 @@ export async function createPdf(input: DocumentInput): Promise<Buffer> {
         color: layout.accentColor,
       });
       document.text(input.title, { align: 'left' });
+      if (layout.subtitle) {
+        applyPdfStyle(document, layout, undefined, { italic: true, size: 11, color: '#444444' });
+        document.text(layout.subtitle, { align: 'left' });
+      }
       document.moveDown();
     }
 
@@ -485,7 +226,7 @@ export async function createPdf(input: DocumentInput): Promise<Buffer> {
       if (block.type === 'heading') {
         applyPdfStyle(document, layout, block.style, {
           bold: true,
-          size: headingSize(block.level, true),
+          size: headingSize(block.level),
           color: layout.accentColor,
         });
         document.text(block.text, { align: pdfAlign(block.align) });
@@ -509,6 +250,32 @@ export async function createPdf(input: DocumentInput): Promise<Buffer> {
           });
         }
         document.moveDown(0.4);
+        continue;
+      }
+      if (block.type === 'checklist') {
+        applyPdfStyle(document, layout, block.style);
+        for (let itemIndex = 0; itemIndex < block.items.length; itemIndex += 1) {
+          const mark = block.checked?.[itemIndex] ? '☑' : '☐';
+          document.text(`${mark} ${block.items[itemIndex]}`, {
+            align: 'left',
+            indent: 8,
+            lineGap: 2,
+          });
+        }
+        document.moveDown(0.4);
+        continue;
+      }
+      if (block.type === 'callout') {
+        applyPdfStyle(document, layout, undefined, { color: layout.accentColor });
+        document.text(block.title ? `${block.title}: ${block.text}` : block.text, {
+          align: 'left',
+          lineGap: 3,
+        });
+        document.moveDown(0.5);
+        continue;
+      }
+      if (block.type === 'pageBreak') {
+        document.addPage();
         continue;
       }
       if (block.type === 'table') {
@@ -537,7 +304,12 @@ export async function createPdf(input: DocumentInput): Promise<Buffer> {
           x = document.page.width - document.page.margins.right - drawWidth;
         }
         document.image(image.data, x, document.y, { width: drawWidth, height: drawHeight });
-        document.y += drawHeight + 8;
+        document.y += drawHeight + 6;
+        if (image.caption) {
+          applyPdfStyle(document, layout, undefined, { italic: true, size: 9, color: '#555555' });
+          document.text(image.caption, { align: pdfAlign(image.align), width: usable });
+        }
+        document.y += 8;
         continue;
       }
       if (block.type === 'spacer') {
@@ -557,4 +329,19 @@ export async function createPdf(input: DocumentInput): Promise<Buffer> {
 
     document.end();
   });
+}
+
+export async function createPdf(
+  input: DocumentInput,
+  deps?: { fetch?: typeof fetch },
+): Promise<Buffer> {
+  const html = await renderPrintHtml(input);
+  const layout = resolveLayout(input.layout);
+  const fromService = await renderPdfViaService(html, layout, {
+    fetch: deps?.fetch ?? globalThis.fetch.bind(globalThis),
+  });
+  if (fromService) {
+    return fromService;
+  }
+  return createPdfWithPdfKit(input);
 }

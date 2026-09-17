@@ -7,7 +7,14 @@ const MAX_DOCUMENT_IMAGE_BYTES = 2 * 1024 * 1024;
 const DOCUMENT_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
 const DOCUMENT_SERVER_NAME = 'documents';
 const DOCUMENT_TOOLS = new Set(['create_docx', 'create_pdf']);
-const LATEST_REFERENCE = 'latest';
+
+function latestImageOffset(fileId) {
+  const match = /^latest(?:-(\d+))?$/.exec(fileId);
+  if (!match) {
+    return null;
+  }
+  return match[1] ? Number(match[1]) : 0;
+}
 const MISSING_STORAGE_CODES = new Set([
   404,
   '404',
@@ -76,7 +83,8 @@ async function resolveDocumentImage({ fileId, req, user }) {
   }
 
   const filter = { user: user.id, type: { $in: DOCUMENT_IMAGE_TYPES } };
-  if (fileId === LATEST_REFERENCE) {
+  const latestOffset = latestImageOffset(fileId);
+  if (latestOffset != null) {
     filter.context = FileContext.image_generation;
   } else {
     filter.file_id = fileId;
@@ -85,17 +93,22 @@ async function resolveDocumentImage({ fileId, req, user }) {
   const files = (await getFiles(filter, { createdAt: -1 })) ?? [];
   if (!files.length) {
     throw new Error(
-      fileId === LATEST_REFERENCE
+      latestOffset != null
         ? 'No generated image found for this user'
         : 'LibreChat image not found or access denied',
     );
   }
 
+  let readableIndex = 0;
   for (const file of files) {
     try {
-      return await readFileAsDataUri(file, req);
+      const dataUri = await readFileAsDataUri(file, req);
+      if (latestOffset == null || readableIndex === latestOffset) {
+        return dataUri;
+      }
+      readableIndex += 1;
     } catch (error) {
-      if (fileId === LATEST_REFERENCE && isMissingStorageError(error)) {
+      if (latestOffset != null && isMissingStorageError(error)) {
         continue;
       }
       if (isMissingStorageError(error)) {

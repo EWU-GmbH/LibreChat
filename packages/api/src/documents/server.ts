@@ -49,6 +49,8 @@ const layoutSchema = z.object({
     .optional(),
   header: z.string().max(200).optional(),
   footer: z.string().max(200).optional(),
+  subtitle: z.string().max(300).optional(),
+  theme: z.enum(['whitepaper', 'report', 'plain']).optional(),
   backgroundColor: z.string().max(9).optional(),
   defaultFont: z.string().min(1).max(60).optional(),
   defaultFontSize: z.number().min(6).max(36).optional(),
@@ -89,9 +91,22 @@ const blockSchema = z.discriminatedUnion('type', [
     type: z.literal('image'),
     src: z.string().min(1).max(2_000_000),
     alt: z.string().max(200).optional(),
+    caption: z.string().max(400).optional(),
     widthMm: z.number().min(10).max(190).optional(),
     align: alignmentSchema.optional(),
   }),
+  z.object({
+    type: z.literal('checklist'),
+    items: z.array(z.string().min(1).max(2000)).min(1).max(100),
+    checked: z.array(z.boolean()).max(100).optional(),
+    style: textStyleSchema.optional(),
+  }),
+  z.object({
+    type: z.literal('callout'),
+    text: z.string().min(1).max(8000),
+    title: z.string().max(200).optional(),
+  }),
+  z.object({ type: z.literal('pageBreak') }),
   z.object({
     type: z.literal('spacer'),
     heightMm: z.number().min(1).max(40).optional(),
@@ -182,16 +197,16 @@ async function storeGeneratedFile(filename: string, extension: string, data: Buf
 }
 
 const toolGuide =
-  ' Übersetze Layout- und Designwünsche aus dem Chat in `layout` und `blocks` ' +
-  '(Überschriften, Absätze, Listen, Tabellen, Linien, Abstände, Bilder). ' +
-  'Für das zuletzt im Chat erzeugte Bild nutze im Bildblock `src: "lc-file:latest"`; ' +
-  'für eine bekannte LibreChat-Datei `src: "lc-file:<file_id>"`. ' +
-  'Bilder als öffentliche https-URL (PNG/JPEG/WebP/SVG) oder PNG/JPEG-data-URI ' +
-  '(max. 2 MB, max. 12 Stück). ' +
-  'Markdown in `content` bleibt möglich, inklusive ![alt](url).';
+  ' Übersetze Layout- und Designwünsche in `layout` (theme whitepaper, kurze header/footer, optional subtitle) ' +
+  'und `blocks` (Überschriften, Absätze, Listen, Tabellen, checklist, callout, pageBreak, Bilder). ' +
+  'Wenn der Nutzer Grafiken, Bilder oder Illustrationen im Dokument will: zuerst die Bild-Werkzeuge aufrufen, ' +
+  'dann jedes Motiv mit `src: "lc-file:<file_id>"` an der passenden Stelle einfügen. ' +
+  '`lc-file:latest` nur bei genau einem Bild; mehrere Bilder mit `lc-file:latest-1`, `latest-2` oder den file_ids. ' +
+  'Bilder als öffentliche https-URL (PNG/JPEG/WebP/SVG) oder PNG/JPEG-data-URI (max. 2 MB, max. 12 Stück). ' +
+  'Markdown in `content` bleibt möglich, inklusive ![alt](url) und - [ ] Checklisten.';
 
 function createMcpServer(): McpServer {
-  const server = new McpServer({ name: 'ewu-documents', version: '1.2.0' });
+  const server = new McpServer({ name: 'ewu-documents', version: '1.3.0' });
 
   server.tool(
     'fetch_url',

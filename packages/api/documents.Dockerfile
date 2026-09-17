@@ -10,6 +10,7 @@ RUN npm install --global npm@10.9.4 \
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV DOCUMENT_STORAGE_PATH=/data
+ENV PDF_SERVICE_URL=
 
 COPY packages/api/src/documents ./src
 

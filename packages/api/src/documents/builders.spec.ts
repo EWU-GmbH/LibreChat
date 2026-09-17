@@ -4,12 +4,26 @@ import ExcelJS from 'exceljs';
 import { assertPublicHttpUrl, isBlockedIp, loadImageSource, parseDataUri } from './images';
 import { createDocx, createPdf, createXlsx } from './builders';
 import { parseMarkdownBlocks } from './model';
+import { renderPrintHtml } from './printHtml';
 
 const PNG_1X1 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const PNG_DATA_URI = `data:image/png;base64,${PNG_1X1}`;
 
 describe('document builders', () => {
+  const previousPdfUrl = process.env.PDF_SERVICE_URL;
+
+  beforeEach(() => {
+    delete process.env.PDF_SERVICE_URL;
+  });
+
+  afterAll(() => {
+    if (previousPdfUrl === undefined) {
+      delete process.env.PDF_SERVICE_URL;
+    } else {
+      process.env.PDF_SERVICE_URL = previousPdfUrl;
+    }
+  });
   it('creates a readable DOCX with title and body', async () => {
     const buffer = await createDocx({
       title: 'Projektstatus',
@@ -104,6 +118,96 @@ describe('document builders', () => {
     expect(buffer.includes(Buffer.from('/Image'))).toBe(true);
     expect(buffer.length).toBeGreaterThan(500);
   });
+
+  it('renders wrapping tables, checklists and callouts in print HTML and DOCX', async () => {
+    const input = {
+      title: 'Lebenslauf schreiben 2026',
+      layout: {
+        header: 'karriere.haus',
+        footer: 'Whitepaper',
+        subtitle: 'Leitfaden mit Checkliste',
+        theme: 'whitepaper' as const,
+      },
+      blocks: [
+        {
+          type: 'table' as const,
+          headers: ['Reihenfolge', 'Abschnitt', 'Hinweis'],
+          rows: [
+            [
+              '1',
+              'Persönliche Daten & Kontakt',
+              'Name, Adresse, Telefon, seriöse E-Mail-Adresse; optional LinkedIn oder Portfolio',
+            ],
+          ],
+        },
+        {
+          type: 'checklist' as const,
+          items: ['Kurzprofil ist individuell auf die Stelle zugeschnitten.'],
+          checked: [false],
+        },
+        {
+          type: 'callout' as const,
+          title: 'Hinweis',
+          text: 'Anforderungen können je nach Branche abweichen.',
+        },
+        {
+          type: 'image' as const,
+          src: PNG_DATA_URI,
+          alt: 'Illustration',
+          caption: 'Passende Grafik',
+          widthMm: 40,
+        },
+      ],
+    };
+
+    const html = await renderPrintHtml(input);
+    expect(html).toContain('seriöse E-Mail-Adresse');
+    expect(html).toContain('img src="data:image/');
+    expect(html).toContain('class="checklist"');
+    expect(html).not.toContain('• &');
+    expect(html).toContain('@bottom-right { content: "Seite " counter(page);');
+    expect(html).not.toContain('Whitepaper · Lebenslauf');
+
+    const buffer = await createDocx(input);
+    const zip = await JSZip.loadAsync(buffer);
+    const documentXml = await zip.file('word/document.xml')?.async('string');
+    const media = Object.keys(zip.files).filter((name) => name.startsWith('word/media/'));
+    expect(documentXml).toContain('Persönliche Daten');
+    expect(documentXml).toContain('Kurzprofil ist individuell');
+    expect(media.length).toBeGreaterThan(0);
+  });
+
+  it('uses the PDF service when PDF_SERVICE_URL is set', async () => {
+    const previous = process.env.PDF_SERVICE_URL;
+    process.env.PDF_SERVICE_URL = 'https://pdf.example';
+    const pdf = Buffer.from('%PDF-1.4 mock');
+    const fetchMock = jest.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return {
+        ok: true,
+        arrayBuffer: async () => pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength),
+      } as Response;
+    });
+
+    try {
+      const buffer = await createPdf(
+        { title: 'Service-PDF', content: 'Hallo' },
+        { fetch: fetchMock as unknown as typeof fetch },
+      );
+      expect(fetchMock).toHaveBeenCalled();
+      expect(fetchMock.mock.calls[0][0]).toBe('https://pdf.example/generate-pdf');
+      expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
+      const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+      expect(body.mainContent).toContain('Hallo');
+      expect(body.headerContent).toBeUndefined();
+      expect(body.options).toMatchObject({ format: 'A4', landscape: false });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.PDF_SERVICE_URL;
+      } else {
+        process.env.PDF_SERVICE_URL = previous;
+      }
+    }
+  });
 });
 
 describe('markdown and image safety', () => {
@@ -127,7 +231,17 @@ describe('markdown and image safety', () => {
       { type: 'heading', level: 1, text: 'Titel' },
       { type: 'table', headers: ['A', 'B'], rows: [['1', '2']] },
       { type: 'list', ordered: false, items: ['eins', 'zwei'] },
-      { type: 'image', alt: 'logo', src: 'https://example.com/logo.png' },
+      { type: 'image', alt: 'logo', src: 'https://example.com/logo.png', caption: 'logo' },
+    ]);
+  });
+
+  it('merges wrapped paragraph lines and parses checklists', () => {
+    const blocks = parseMarkdownBlocks(
+      ['Dies ist ein', 'umgebrochener Satz.', '', '- [ ] Offen', '- [x] Erledigt'].join('\n'),
+    );
+    expect(blocks).toEqual([
+      { type: 'paragraph', text: 'Dies ist ein umgebrochener Satz.' },
+      { type: 'checklist', items: ['Offen', 'Erledigt'], checked: [false, true] },
     ]);
   });
 
@@ -166,7 +280,7 @@ describe('markdown and image safety', () => {
       lookup: async () => [{ address: '93.184.216.34', family: 4 }],
     });
 
-    expect(image.format).toBe('png');
-    expect(image.data.subarray(1, 4).toString('ascii')).toBe('PNG');
+    expect(image.format).toBe('jpg');
+    expect(image.data[0]).toBe(0xff);
   });
 });
