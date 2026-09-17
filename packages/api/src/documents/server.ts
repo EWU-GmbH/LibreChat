@@ -153,7 +153,9 @@ function fetchedPageResult(page: Awaited<ReturnType<typeof fetchUrl>>) {
   const images = page.images.length
     ? page.images.map((image) => `- ${image.alt ?? 'Bild'}: ${image.url}`).join('\n')
     : '- Keine gefunden';
-  const colors = page.colors.length ? page.colors.map((color) => `- ${color}`).join('\n') : '- Keine';
+  const colors = page.colors.length
+    ? page.colors.map((color) => `- ${color}`).join('\n')
+    : '- Keine';
   const truncation = page.truncated ? '\n\nHinweis: Der Inhalt wurde am Größenlimit gekürzt.' : '';
   return {
     content: [
@@ -184,7 +186,8 @@ const toolGuide =
   '(Überschriften, Absätze, Listen, Tabellen, Linien, Abstände, Bilder). ' +
   'Für das zuletzt im Chat erzeugte Bild nutze im Bildblock `src: "lc-file:latest"`; ' +
   'für eine bekannte LibreChat-Datei `src: "lc-file:<file_id>"`. ' +
-  'Bilder als öffentliche https-URL oder data-URI (PNG/JPEG, max. 2 MB, max. 12 Stück). ' +
+  'Bilder als öffentliche https-URL (PNG/JPEG/WebP/SVG) oder PNG/JPEG-data-URI ' +
+  '(max. 2 MB, max. 12 Stück). ' +
   'Markdown in `content` bleibt möglich, inklusive ![alt](url).';
 
 function createMcpServer(): McpServer {

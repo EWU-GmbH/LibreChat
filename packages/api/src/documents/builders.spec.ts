@@ -151,4 +151,22 @@ describe('markdown and image safety', () => {
       }),
     ).rejects.toThrow('nicht erlaubt');
   });
+
+  it('converts public SVG logos to PNG for documents', async () => {
+    const svg = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><rect width="120" height="40" fill="#123456"/></svg>',
+    );
+    const image = await loadImageSource('https://example.com/logo.svg', 40, 'Logo', 'left', {
+      fetch: async () =>
+        ({
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => svg,
+        }) as Pick<Response, 'arrayBuffer' | 'ok' | 'status'>,
+      lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+    });
+
+    expect(image.format).toBe('png');
+    expect(image.data.subarray(1, 4).toString('ascii')).toBe('PNG');
+  });
 });

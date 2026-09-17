@@ -180,8 +180,9 @@ function absoluteUrl(value: string | undefined, base: URL): string | null {
 
 function extractColors(html: string): string[] {
   const matches =
-    html.match(/#[0-9a-f]{3,8}\b|rgba?\(\s*\d{1,3}(?:\s*,\s*\d{1,3}){2}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)/gi) ??
-    [];
+    html.match(
+      /#[0-9a-f]{3,8}\b|rgba?\(\s*\d{1,3}(?:\s*,\s*\d{1,3}){2}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)/gi,
+    ) ?? [];
   const colors = new Set<string>();
   for (const match of matches) {
     colors.add(match.toLowerCase());
@@ -238,7 +239,10 @@ export function extractPage(html: string, url: URL): Omit<FetchedPage, 'url' | '
   return { title, markdown, images, colors: colors.slice(0, MAX_COLORS) };
 }
 
-export async function fetchUrl(value: string, deps: FetchUrlDeps = defaultDeps): Promise<FetchedPage> {
+export async function fetchUrl(
+  value: string,
+  deps: FetchUrlDeps = defaultDeps,
+): Promise<FetchedPage> {
   const requestedUrl = parsePublicUrl(value);
   await assertPublicDns(requestedUrl, deps);
   await assertRobotsAllowed(requestedUrl, deps);
