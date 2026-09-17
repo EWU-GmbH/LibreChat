@@ -7,7 +7,10 @@ export const MAX_IMAGES = 12;
 export const DEFAULT_IMAGE_WIDTH_MM = 120;
 
 export interface ImageLoaderDeps {
-  fetch: typeof fetch;
+  fetch: (
+    input: string | URL,
+    init?: RequestInit,
+  ) => Promise<Pick<Response, 'arrayBuffer' | 'ok' | 'status'>>;
   lookup: (hostname: string) => Promise<Array<{ address: string; family: number }>>;
 }
 
