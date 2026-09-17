@@ -9,6 +9,13 @@ const defaultDeps: PdfServiceDeps = {
 };
 
 const DEFAULT_RENDER_PATH = '/generate-pdf';
+/** The service parses the request with a 10 MB JSON body limit. */
+const DEFAULT_MAX_BODY_BYTES = 9 * 1024 * 1024;
+
+function maxBodyBytes(): number {
+  const configured = Number(process.env.PDF_MAX_HTML_BYTES);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MAX_BODY_BYTES;
+}
 
 function pdfServiceEndpoint(): string | null {
   const configured = process.env.PDF_SERVICE_URL?.trim();
@@ -38,6 +45,27 @@ export async function renderPdfViaService(
     headers.Authorization = `Bearer ${token}`;
   }
 
+  /** Header, footer and page numbers come from the `@page` margin boxes in the HTML;
+   * sending templates as well makes Chromium print both. */
+  const body = JSON.stringify({
+    mainContent: html,
+    options: {
+      format: layout.pageSize,
+      landscape: layout.orientation === 'landscape',
+      margins: {
+        top: `${layout.marginsMm.top}mm`,
+        right: `${layout.marginsMm.right}mm`,
+        bottom: `${layout.marginsMm.bottom}mm`,
+        left: `${layout.marginsMm.left}mm`,
+      },
+    },
+  });
+  if (Buffer.byteLength(body) > maxBodyBytes()) {
+    throw new Error(
+      'Dokument ist für den PDF-Dienst zu groß. Bitte weniger oder kleinere Bilder verwenden.',
+    );
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
   try {
@@ -45,21 +73,7 @@ export async function renderPdfViaService(
       method: 'POST',
       headers,
       signal: controller.signal,
-      /** Header, footer and page numbers come from the `@page` margin boxes in the HTML;
-       * sending templates as well makes Chromium print both. */
-      body: JSON.stringify({
-        mainContent: html,
-        options: {
-          format: layout.pageSize,
-          landscape: layout.orientation === 'landscape',
-          margins: {
-            top: `${layout.marginsMm.top}mm`,
-            right: `${layout.marginsMm.right}mm`,
-            bottom: `${layout.marginsMm.bottom}mm`,
-            left: `${layout.marginsMm.left}mm`,
-          },
-        },
-      }),
+      body,
     });
     const bytes = Buffer.from(await response.arrayBuffer());
     if (!response.ok) {
