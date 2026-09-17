@@ -1,8 +1,8 @@
 import React, { memo } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { CheckboxButton } from '@librechat/client';
-import { useLocalize } from '~/hooks';
 import { useBadgeRowContext } from '~/Providers';
+import { useLocalize } from '~/hooks';
 
 function PIIProtection() {
   const localize = useLocalize();

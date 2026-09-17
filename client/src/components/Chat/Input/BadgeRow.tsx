@@ -15,14 +15,14 @@ import type { BadgeItem } from '~/common';
 import CodeInterpreter from './CodeInterpreter';
 import { BadgeRowProvider } from '~/Providers';
 import ToolsDropdown from './ToolsDropdown';
-import { useChatBadges } from '~/hooks';
+import PIIProtection from './PIIProtection';
 import ToolDialogs from './ToolDialogs';
+import { useChatBadges } from '~/hooks';
 import FileSearch from './FileSearch';
 import Artifacts from './Artifacts';
 import MCPSelect from './MCPSelect';
 import WebSearch from './WebSearch';
 import Skills from './Skills';
-import PIIProtection from './PIIProtection';
 import store from '~/store';
 
 interface BadgeRowProps {
