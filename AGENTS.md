@@ -131,3 +131,27 @@ Railway GraphQL / REST calls from the VM must send a browser-like `User-Agent`
 `uaParser` middleware, which rejects requests without a browser-like
 `User-Agent` (`"Illegal request"`); include a `Mozilla/5.0 ...` UA on admin API
 calls (agent creation, permissions, `/api/agents/chat`).
+
+### Image generation via OpenRouter (Gemini + OpenAI/"DALL·E")
+
+LibreChat image tools can run through OpenRouter's OpenAI-compatible Images API
+(`POST /api/v1/images/generations`). Classic `dall-e-3` is not on OpenRouter —
+use `openai/gpt-5-image` (or similar) for the DALL·E / OpenAI Image Tools path.
+
+Production variables on service `LibreChat 🪶`:
+
+```
+OPENROUTER_API_KEY=<key>          # or OPENROUTER_KEY
+GEMINI_IMAGE_PROVIDER=openrouter
+GEMINI_IMAGE_MODEL=google/gemini-2.5-flash-image
+IMAGE_GEN_OAI_BASEURL=https://openrouter.ai/api/v1
+IMAGE_GEN_OAI_MODEL=openai/gpt-5-image
+DALLE_REVERSE_PROXY=https://openrouter.ai/api/v1
+DALLE3_MODEL=openai/gpt-5-image
+```
+
+`IMAGE_GEN_OAI_API_KEY` / `DALLE3_API_KEY` may reuse the OpenRouter key, or be
+omitted when `OPENROUTER_API_KEY` is set (tools fall back to it).
+
+Enable the tools on the Agent: `gemini_image_gen`, `image_gen_oai` (preferred
+over legacy `dalle`), and/or `dalle`.

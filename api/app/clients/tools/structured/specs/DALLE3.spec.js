@@ -73,7 +73,30 @@ describe('DALLE3', () => {
   it('should throw an error if all potential API keys are missing', () => {
     delete process.env.DALLE3_API_KEY;
     delete process.env.DALLE_API_KEY;
-    expect(() => new DALLE3()).toThrow('Missing DALLE_API_KEY environment variable.');
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENROUTER_KEY;
+    expect(() => new DALLE3()).toThrow(
+      'Missing DALLE_API_KEY or OPENROUTER_API_KEY environment variable.',
+    );
+  });
+
+  it('should use OpenRouter when only OPENROUTER_API_KEY is set', () => {
+    delete process.env.DALLE3_API_KEY;
+    delete process.env.DALLE_API_KEY;
+    delete process.env.DALLE_REVERSE_PROXY;
+    delete process.env.DALLE3_BASEURL;
+    delete process.env.DALLE3_MODEL;
+    process.env.OPENROUTER_API_KEY = 'or-key';
+    delete process.env.OPENROUTER_KEY;
+
+    const tool = new DALLE3({ processFileURL, isAgent: true });
+    expect(tool.imageModel).toBe('openai/gpt-5-image');
+    expect(OpenAI).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: 'or-key',
+        baseURL: 'https://openrouter.ai/api/v1',
+      }),
+    );
   });
 
   it('should replace unwanted characters in input string', () => {

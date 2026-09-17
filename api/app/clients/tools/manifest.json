@@ -34,13 +34,13 @@
     "name": "OpenAI Image Tools",
     "pluginKey": "image_gen_oai",
     "toolkit": true,
-    "description": "Image Generation and Editing using OpenAI's latest state-of-the-art models",
+    "description": "Image Generation and Editing using OpenAI's latest state-of-the-art models (direct OpenAI or via OpenRouter)",
     "icon": "assets/image_gen_oai.png",
     "authConfig": [
       {
-        "authField": "IMAGE_GEN_OAI_API_KEY",
-        "label": "OpenAI Image Tools API Key",
-        "description": "Your OpenAI API Key for Image Generation and Editing"
+        "authField": "IMAGE_GEN_OAI_API_KEY||OPENROUTER_API_KEY||OPENROUTER_KEY",
+        "label": "OpenAI / OpenRouter Image Tools API Key",
+        "description": "Your OpenAI API Key, or an OpenRouter key (set IMAGE_GEN_OAI_BASEURL=https://openrouter.ai/api/v1)."
       }
     ]
   },
@@ -60,13 +60,13 @@
   {
     "name": "DALL-E-3",
     "pluginKey": "dalle",
-    "description": "[DALL-E-3] Create realistic images and art from a description in natural language",
+    "description": "[DALL-E-3] Create realistic images and art from a description in natural language. Supports OpenAI directly or OpenRouter (openai/gpt-*-image).",
     "icon": "assets/openai.svg",
     "authConfig": [
       {
-        "authField": "DALLE3_API_KEY||DALLE_API_KEY",
-        "label": "OpenAI API Key",
-        "description": "You can use DALL-E with your API Key from OpenAI."
+        "authField": "DALLE3_API_KEY||DALLE_API_KEY||OPENROUTER_API_KEY||OPENROUTER_KEY",
+        "label": "OpenAI / OpenRouter API Key",
+        "description": "OpenAI key for DALL·E, or an OpenRouter key (set DALLE_REVERSE_PROXY / DALLE3_MODEL for OpenRouter)."
       }
     ]
   },
@@ -156,13 +156,13 @@
   {
     "name": "Gemini Image Tools",
     "pluginKey": "gemini_image_gen",
-    "description": "Generate high-quality images using Google's Gemini Image Models. Supports Gemini API or Vertex AI.",
+    "description": "Generate high-quality images using Google's Gemini Image Models. Supports Gemini API, Vertex AI, or OpenRouter.",
     "icon": "assets/gemini_image_gen.svg",
     "authConfig": [
       {
-        "authField": "GEMINI_API_KEY||GOOGLE_KEY||GOOGLE_SERVICE_KEY_FILE",
-        "label": "Gemini API Key (optional)",
-        "description": "Your Google Gemini API Key from <a href='https://aistudio.google.com/app/apikey' target='_blank'>Google AI Studio</a>. Leave blank to use Vertex AI with a service account (GOOGLE_SERVICE_KEY_FILE or api/data/auth.json).",
+        "authField": "GEMINI_API_KEY||GOOGLE_KEY||GOOGLE_SERVICE_KEY_FILE||OPENROUTER_API_KEY||OPENROUTER_KEY",
+        "label": "Gemini / OpenRouter API Key (optional)",
+        "description": "Gemini API key from <a href='https://aistudio.google.com/app/apikey' target='_blank'>Google AI Studio</a>, Vertex service account, or OpenRouter key (set GEMINI_IMAGE_PROVIDER=openrouter).",
         "optional": true
       }
     ]

@@ -14,6 +14,12 @@ const {
 } = require('@librechat/api');
 const { getStrategyFunctions } = require('~/server/services/Files/strategies');
 const { getFiles } = require('~/models');
+const {
+  OPENROUTER_BASE_URL,
+  DEFAULT_OPENROUTER_OPENAI_IMAGE_MODEL,
+  getOpenRouterApiKey,
+  isOpenRouterBaseUrl,
+} = require('~/app/clients/tools/util/openrouterImage');
 
 const displayMessage =
   "The tool displayed an image. All generated images are already plainly visible, so don't repeat the descriptions in detail. Do not list download links as they are available in the UI already. The user may download the images by clicking on them, but do not mention anything about downloading to the user.";
@@ -72,9 +78,9 @@ function createOpenAIImageTools(fields = {}) {
   const appFileStrategy = fields.fileStrategy;
 
   const getApiKey = () => {
-    const apiKey = process.env.IMAGE_GEN_OAI_API_KEY ?? '';
+    const apiKey = process.env.IMAGE_GEN_OAI_API_KEY || getOpenRouterApiKey() || '';
     if (!apiKey && !override) {
-      throw new Error('Missing IMAGE_GEN_OAI_API_KEY environment variable.');
+      throw new Error('Missing IMAGE_GEN_OAI_API_KEY or OPENROUTER_API_KEY environment variable.');
     }
     return apiKey;
   };
@@ -82,11 +88,18 @@ function createOpenAIImageTools(fields = {}) {
   let apiKey = fields.IMAGE_GEN_OAI_API_KEY ?? getApiKey();
   const closureConfig = { apiKey };
 
-  const imageModel = process.env.IMAGE_GEN_OAI_MODEL || 'gpt-image-1';
+  const configuredBaseURL = process.env.IMAGE_GEN_OAI_BASEURL || '';
+  const useOpenRouter =
+    isOpenRouterBaseUrl(configuredBaseURL) ||
+    (!configuredBaseURL && !process.env.IMAGE_GEN_OAI_API_KEY && Boolean(getOpenRouterApiKey()));
+
+  let imageModel =
+    process.env.IMAGE_GEN_OAI_MODEL ||
+    (useOpenRouter ? DEFAULT_OPENROUTER_OPENAI_IMAGE_MODEL : 'gpt-image-1');
 
   let baseURL = 'https://api.openai.com/v1/';
-  if (!override && process.env.IMAGE_GEN_OAI_BASEURL) {
-    baseURL = extractBaseURL(process.env.IMAGE_GEN_OAI_BASEURL);
+  if (!override && (configuredBaseURL || useOpenRouter)) {
+    baseURL = extractBaseURL(configuredBaseURL || OPENROUTER_BASE_URL);
     closureConfig.baseURL = baseURL;
   }
 

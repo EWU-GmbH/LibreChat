@@ -12,6 +12,12 @@ const {
   createMinimalRetentionRequest,
 } = require('@librechat/api');
 const { FileContext, ContentTypes } = require('librechat-data-provider');
+const {
+  OPENROUTER_BASE_URL,
+  DEFAULT_OPENROUTER_OPENAI_IMAGE_MODEL,
+  getOpenRouterApiKey,
+  isOpenRouterBaseUrl,
+} = require('~/app/clients/tools/util/openrouterImage');
 
 const dalle3JsonSchema = {
   type: 'object',
@@ -68,10 +74,31 @@ class DALLE3 extends Tool {
       this.processFileURL = fields.processFileURL.bind(this);
     }
 
-    let apiKey = fields.DALLE3_API_KEY ?? fields.DALLE_API_KEY ?? this.getApiKey();
+    const explicitDalleKey =
+      fields.DALLE3_API_KEY ??
+      fields.DALLE_API_KEY ??
+      process.env.DALLE3_API_KEY ??
+      process.env.DALLE_API_KEY ??
+      '';
+    const openRouterKey = getOpenRouterApiKey();
+    const reverseProxy = process.env.DALLE_REVERSE_PROXY || process.env.DALLE3_BASEURL || '';
+    const useOpenRouter =
+      isOpenRouterBaseUrl(reverseProxy) ||
+      (typeof process.env.DALLE3_MODEL === 'string' && process.env.DALLE3_MODEL.includes('/')) ||
+      (!reverseProxy && !explicitDalleKey && Boolean(openRouterKey));
+
+    let apiKey = explicitDalleKey || (useOpenRouter ? openRouterKey : '') || this.getApiKey();
     const config = { apiKey };
-    if (process.env.DALLE_REVERSE_PROXY) {
-      config.baseURL = extractBaseURL(process.env.DALLE_REVERSE_PROXY);
+
+    if (useOpenRouter) {
+      config.apiKey = apiKey || openRouterKey;
+      config.baseURL = extractBaseURL(reverseProxy || OPENROUTER_BASE_URL);
+      this.imageModel = process.env.DALLE3_MODEL || DEFAULT_OPENROUTER_OPENAI_IMAGE_MODEL;
+    } else {
+      if (process.env.DALLE_REVERSE_PROXY) {
+        config.baseURL = extractBaseURL(process.env.DALLE_REVERSE_PROXY);
+      }
+      this.imageModel = process.env.DALLE3_MODEL || 'dall-e-3';
     }
 
     if (process.env.DALLE3_AZURE_API_VERSION && process.env.DALLE3_BASEURL) {
@@ -82,6 +109,7 @@ class DALLE3 extends Tool {
         'Content-Type': 'application/json',
       };
       config.apiKey = process.env.DALLE3_API_KEY;
+      this.imageModel = process.env.DALLE3_MODEL || 'dall-e-3';
     }
 
     const proxyDispatcher = getProxyDispatcher();
@@ -121,9 +149,10 @@ class DALLE3 extends Tool {
   }
 
   getApiKey() {
-    const apiKey = process.env.DALLE3_API_KEY ?? process.env.DALLE_API_KEY ?? '';
+    const apiKey =
+      process.env.DALLE3_API_KEY ?? process.env.DALLE_API_KEY ?? getOpenRouterApiKey() ?? '';
     if (!apiKey && !this.override) {
-      throw new Error('Missing DALLE_API_KEY environment variable.');
+      throw new Error('Missing DALLE_API_KEY or OPENROUTER_API_KEY environment variable.');
     }
     return apiKey;
   }
@@ -157,14 +186,22 @@ class DALLE3 extends Tool {
 
     let resp;
     try {
-      resp = await this.openai.images.generate({
-        model: 'dall-e-3',
-        quality,
-        style,
-        size,
+      const generateParams = {
+        model: this.imageModel || process.env.DALLE3_MODEL || 'dall-e-3',
         prompt: this.replaceUnwantedChars(prompt),
         n: 1,
-      });
+      };
+
+      // Classic DALL·E-3 supports quality/style/size; OpenRouter OpenAI image models vary.
+      if (generateParams.model === 'dall-e-3' || generateParams.model.startsWith('dall-e')) {
+        generateParams.quality = quality;
+        generateParams.style = style;
+        generateParams.size = size;
+      } else if (size) {
+        generateParams.size = size;
+      }
+
+      resp = await this.openai.images.generate(generateParams);
     } catch (error) {
       logger.error('[DALL-E-3] Problem generating the image:', error);
       return this
@@ -178,23 +215,28 @@ Error Message: ${error.message}`);
       );
     }
 
-    const theImageUrl = resp.data[0].url;
+    const imageResult = resp.data[0];
+    const theImageUrl = imageResult?.url;
+    const b64Json = imageResult?.b64_json;
 
-    if (!theImageUrl) {
+    if (!theImageUrl && !b64Json) {
       return this.returnValue(
-        'No image URL returned from OpenAI API. There may be a problem with the API or your configuration.',
+        'No image URL or base64 data returned from image API. There may be a problem with the API or your configuration.',
       );
     }
 
     if (this.isAgent) {
-      let fetchOptions = {};
-      const dispatcher = getEnvProxyDispatcher();
-      if (dispatcher) {
-        fetchOptions.dispatcher = dispatcher;
+      let base64 = b64Json;
+      if (!base64 && theImageUrl) {
+        let fetchOptions = {};
+        const dispatcher = getEnvProxyDispatcher();
+        if (dispatcher) {
+          fetchOptions.dispatcher = dispatcher;
+        }
+        const imageResponse = await fetch(theImageUrl, fetchOptions);
+        const arrayBuffer = await imageResponse.arrayBuffer();
+        base64 = Buffer.from(arrayBuffer).toString('base64');
       }
-      const imageResponse = await fetch(theImageUrl, fetchOptions);
-      const arrayBuffer = await imageResponse.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString('base64');
       const content = [
         {
           type: ContentTypes.IMAGE_URL,
@@ -211,6 +253,12 @@ Error Message: ${error.message}`);
         },
       ];
       return [response, { content }];
+    }
+
+    if (!theImageUrl) {
+      return this.returnValue(
+        'Image providers that return base64 only are supported for Agents. Enable the tool on an Agent, or configure a provider that returns image URLs.',
+      );
     }
 
     const imageBasename = getImageBasename(theImageUrl);

@@ -14,6 +14,15 @@ const {
 } = require('@librechat/api');
 const { getStrategyFunctions } = require('~/server/services/Files/strategies');
 const { spendTokens, getFiles } = require('~/models');
+const {
+  OPENROUTER_BASE_URL,
+  DEFAULT_OPENROUTER_GEMINI_IMAGE_MODEL,
+  getOpenRouterApiKey,
+  isOpenRouterBaseUrl,
+  isOpenRouterModelId,
+  createOpenRouterImageClient,
+  generateImageViaOpenAICompatible,
+} = require('~/app/clients/tools/util/openrouterImage');
 
 /**
  * Configure proxy support for Google APIs
@@ -85,24 +94,90 @@ async function convertImageFormat(inputBuffer, targetFormat) {
 }
 
 /**
- * Initialize Gemini client (supports both Gemini API and Vertex AI)
- * Priority: API key (from options, resolved by loadAuthValues) > Vertex AI service account
+ * Resolve whether Gemini image generation should run through OpenRouter's
+ * OpenAI-compatible Images API (instead of the Google GenAI SDK).
+ * @param {Object} options
+ * @param {string} [options.GEMINI_API_KEY]
+ * @param {string} [options.GOOGLE_KEY]
+ * @returns {{ enabled: boolean, apiKey: string, baseURL: string, model: string }}
+ */
+function resolveOpenRouterGeminiConfig(options = {}) {
+  const configuredBaseURL = process.env.GEMINI_IMAGE_BASEURL || '';
+  const configuredModel = process.env.GEMINI_IMAGE_MODEL || '';
+  const provider = (process.env.GEMINI_IMAGE_PROVIDER || '').toLowerCase();
+  const openRouterKey = getOpenRouterApiKey();
+  const explicitOpenRouter =
+    provider === 'openrouter' ||
+    isOpenRouterBaseUrl(configuredBaseURL) ||
+    isOpenRouterModelId(configuredModel);
+
+  if (!explicitOpenRouter && !openRouterKey) {
+    return { enabled: false, apiKey: '', baseURL: '', model: '' };
+  }
+
+  const apiKey =
+    (explicitOpenRouter && (options.GEMINI_API_KEY || options.GOOGLE_KEY)) ||
+    openRouterKey ||
+    options.GEMINI_API_KEY ||
+    options.GOOGLE_KEY ||
+    '';
+
+  if (!apiKey) {
+    return { enabled: false, apiKey: '', baseURL: '', model: '' };
+  }
+
+  // Prefer OpenRouter when explicitly configured, or when it is the only available key.
+  const hasNativeGoogleKey = Boolean(options.GEMINI_API_KEY || options.GOOGLE_KEY);
+  const enabled = explicitOpenRouter || (Boolean(openRouterKey) && !hasNativeGoogleKey);
+  if (!enabled) {
+    return { enabled: false, apiKey: '', baseURL: '', model: '' };
+  }
+
+  return {
+    enabled: true,
+    apiKey,
+    baseURL: configuredBaseURL || OPENROUTER_BASE_URL,
+    model: isOpenRouterModelId(configuredModel)
+      ? configuredModel
+      : DEFAULT_OPENROUTER_GEMINI_IMAGE_MODEL,
+  };
+}
+
+/**
+ * Initialize Gemini client (supports Gemini API, Vertex AI, and OpenRouter)
+ * Priority: OpenRouter (when configured) > API key > Vertex AI service account
  * @param {Object} options - Initialization options
  * @param {string} [options.GEMINI_API_KEY] - Gemini API key (resolved by loadAuthValues)
  * @param {string} [options.GOOGLE_KEY] - Google API key (resolved by loadAuthValues)
- * @returns {Promise<GoogleGenAI>} - The initialized client
+ * @returns {Promise<{ mode: 'google', client: GoogleGenAI } | { mode: 'openrouter', client: import('openai'), model: string }>}
  */
 async function initializeGeminiClient(options = {}) {
+  const openRouter = resolveOpenRouterGeminiConfig(options);
+  if (openRouter.enabled) {
+    logger.debug('[GeminiImageGen] Using OpenRouter Images API', {
+      baseURL: openRouter.baseURL,
+      model: openRouter.model,
+    });
+    return {
+      mode: 'openrouter',
+      client: createOpenRouterImageClient({
+        apiKey: openRouter.apiKey,
+        baseURL: openRouter.baseURL,
+      }),
+      model: openRouter.model,
+    };
+  }
+
   const geminiKey = options.GEMINI_API_KEY;
   if (geminiKey) {
     logger.debug('[GeminiImageGen] Using Gemini API with GEMINI_API_KEY');
-    return new GoogleGenAI({ apiKey: geminiKey });
+    return { mode: 'google', client: new GoogleGenAI({ apiKey: geminiKey }) };
   }
 
   const googleKey = options.GOOGLE_KEY;
   if (googleKey) {
     logger.debug('[GeminiImageGen] Using Gemini API with GOOGLE_KEY');
-    return new GoogleGenAI({ apiKey: googleKey });
+    return { mode: 'google', client: new GoogleGenAI({ apiKey: googleKey }) };
   }
 
   logger.debug('[GeminiImageGen] Using Vertex AI with service account');
@@ -111,17 +186,20 @@ async function initializeGeminiClient(options = {}) {
 
   if (!serviceKey || !serviceKey.project_id) {
     throw new Error(
-      'Gemini Image Generation requires one of: user-provided API key, GEMINI_API_KEY or GOOGLE_KEY env var, or a valid Google service account. ' +
+      'Gemini Image Generation requires one of: OpenRouter (OPENROUTER_API_KEY / GEMINI_IMAGE_PROVIDER=openrouter), GEMINI_API_KEY or GOOGLE_KEY env var, or a valid Google service account. ' +
         `Service account file not found or invalid at: ${credentialsPath}`,
     );
   }
 
-  return new GoogleGenAI({
-    vertexai: true,
-    project: serviceKey.project_id,
-    location: process.env.GOOGLE_CLOUD_LOCATION || process.env.GOOGLE_LOC || 'global',
-    googleAuthOptions: { credentials: serviceKey },
-  });
+  return {
+    mode: 'google',
+    client: new GoogleGenAI({
+      vertexai: true,
+      project: serviceKey.project_id,
+      location: process.env.GOOGLE_CLOUD_LOCATION || process.env.GOOGLE_LOC || 'global',
+      googleAuthOptions: { credentials: serviceKey },
+    }),
+  };
 }
 
 /**
@@ -328,9 +406,9 @@ function createGeminiImageTool(fields = {}) {
 
       logger.debug('[GeminiImageGen] Generating image', { aspectRatio, imageSize });
 
-      let ai;
+      let backend;
       try {
-        ai = await initializeGeminiClient({
+        backend = await initializeGeminiClient({
           GEMINI_API_KEY,
           GOOGLE_KEY,
         });
@@ -342,36 +420,6 @@ function createGeminiImageTool(fields = {}) {
         ];
       }
 
-      const contents = [{ text: replaceUnwantedChars(prompt) }];
-
-      if (image_ids?.length > 0) {
-        const contextImages = await convertImagesToInlineData({
-          imageFiles,
-          image_ids,
-          req,
-          fileStrategy,
-        });
-        contents.push(...contextImages);
-        logger.debug('[GeminiImageGen] Added', contextImages.length, 'context images');
-      }
-
-      let apiResponse;
-      const geminiModel = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
-      const config = {
-        responseModalities: ['TEXT', 'IMAGE'],
-      };
-
-      const supportsImageSize = !geminiModel.includes('gemini-2.5-flash-image');
-      if (aspectRatio || (imageSize && supportsImageSize)) {
-        config.imageConfig = {};
-        if (aspectRatio) {
-          config.imageConfig.aspectRatio = aspectRatio;
-        }
-        if (imageSize && supportsImageSize) {
-          config.imageConfig.imageSize = imageSize;
-        }
-      }
-
       let derivedSignal = null;
       let abortHandler = null;
 
@@ -379,15 +427,83 @@ function createGeminiImageTool(fields = {}) {
         derivedSignal = AbortSignal.any([runnableConfig.signal]);
         abortHandler = () => logger.debug('[GeminiImageGen] Image generation aborted');
         derivedSignal.addEventListener('abort', abortHandler, { once: true });
-        config.abortSignal = derivedSignal;
       }
 
+      /** @type {string} */
+      let rawImageData;
+      /** @type {string} */
+      let geminiModel;
+      /** @type {Object} */
+      let usageMetadata;
+
       try {
-        apiResponse = await ai.models.generateContent({
-          model: geminiModel,
-          contents,
-          config,
-        });
+        if (backend.mode === 'openrouter') {
+          geminiModel = backend.model;
+          if (image_ids?.length > 0) {
+            logger.warn(
+              '[GeminiImageGen] OpenRouter Images API does not support image_ids context; generating from prompt only',
+            );
+          }
+          const { b64 } = await generateImageViaOpenAICompatible({
+            client: backend.client,
+            model: geminiModel,
+            prompt: replaceUnwantedChars(prompt),
+            signal: derivedSignal,
+          });
+          rawImageData = b64;
+        } else {
+          const ai = backend.client;
+          const contents = [{ text: replaceUnwantedChars(prompt) }];
+
+          if (image_ids?.length > 0) {
+            const contextImages = await convertImagesToInlineData({
+              imageFiles,
+              image_ids,
+              req,
+              fileStrategy,
+            });
+            contents.push(...contextImages);
+            logger.debug('[GeminiImageGen] Added', contextImages.length, 'context images');
+          }
+
+          geminiModel = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
+          const config = {
+            responseModalities: ['TEXT', 'IMAGE'],
+          };
+
+          const supportsImageSize = !geminiModel.includes('gemini-2.5-flash-image');
+          if (aspectRatio || (imageSize && supportsImageSize)) {
+            config.imageConfig = {};
+            if (aspectRatio) {
+              config.imageConfig.aspectRatio = aspectRatio;
+            }
+            if (imageSize && supportsImageSize) {
+              config.imageConfig.imageSize = imageSize;
+            }
+          }
+
+          if (derivedSignal) {
+            config.abortSignal = derivedSignal;
+          }
+
+          const apiResponse = await ai.models.generateContent({
+            model: geminiModel,
+            contents,
+            config,
+          });
+
+          const safetyBlock = checkForSafetyBlock(apiResponse);
+          if (safetyBlock) {
+            logger.warn('[GeminiImageGen] Safety block:', safetyBlock);
+            const errorMsg =
+              'Image blocked by content safety filters. Please try different content.';
+            return [[{ type: ContentTypes.TEXT, text: errorMsg }], { content: [], file_ids: [] }];
+          }
+
+          rawImageData = apiResponse.candidates?.[0]?.content?.parts?.find((p) => p.inlineData)
+            ?.inlineData?.data;
+          usageMetadata = apiResponse.usageMetadata;
+        }
       } catch (error) {
         logger.error('[GeminiImageGen] API error:', error);
         return [
@@ -399,16 +515,6 @@ function createGeminiImageTool(fields = {}) {
           derivedSignal.removeEventListener('abort', abortHandler);
         }
       }
-
-      const safetyBlock = checkForSafetyBlock(apiResponse);
-      if (safetyBlock) {
-        logger.warn('[GeminiImageGen] Safety block:', safetyBlock);
-        const errorMsg = 'Image blocked by content safety filters. Please try different content.';
-        return [[{ type: ContentTypes.TEXT, text: errorMsg }], { content: [], file_ids: [] }];
-      }
-
-      const rawImageData = apiResponse.candidates?.[0]?.content?.parts?.find((p) => p.inlineData)
-        ?.inlineData?.data;
 
       if (!rawImageData) {
         logger.warn('[GeminiImageGen] No image data in response');
@@ -449,16 +555,18 @@ function createGeminiImageTool(fields = {}) {
       const messageId =
         runnableConfig?.configurable?.run_id ??
         runnableConfig?.configurable?.requestBody?.messageId;
-      recordTokenUsage({
-        usageMetadata: apiResponse.usageMetadata,
-        req,
-        userId,
-        messageId,
-        conversationId,
-        model: geminiModel,
-      }).catch((error) => {
-        logger.error('[GeminiImageGen] Failed to record token usage:', error);
-      });
+      if (usageMetadata) {
+        recordTokenUsage({
+          usageMetadata,
+          req,
+          userId,
+          messageId,
+          conversationId,
+          model: geminiModel,
+        }).catch((error) => {
+          logger.error('[GeminiImageGen] Failed to record token usage:', error);
+        });
+      }
 
       return [textResponse, { content, file_ids }];
     },
