@@ -2,8 +2,8 @@ import { Types } from 'mongoose';
 import { SystemRoles } from 'librechat-data-provider';
 import type { IUser } from '@librechat/data-schemas';
 import type { Response } from 'express';
-import type { ServerRequest } from '~/types/http';
 import type { AdminUserManagementDeps } from './userManagement';
+import type { ServerRequest } from '~/types/http';
 import { createAdminUserManagementHandlers } from './userManagement';
 
 jest.mock('@librechat/data-schemas', () => ({
