@@ -80,6 +80,107 @@ describe('resolveDocumentToolImages', () => {
     expect(mockGetDownloadStream).not.toHaveBeenCalled();
   });
 
+  it('skips orphaned latest metadata and uses the next readable generated image', async () => {
+    getFiles.mockResolvedValue([
+      {
+        user: user.id,
+        file_id: 'file_orphan',
+        filepath: '/images/user-1/orphan.png',
+        type: 'image/png',
+        source: 'local',
+        context: 'image_generation',
+        bytes: 12,
+      },
+      {
+        user: user.id,
+        file_id: 'file_ok',
+        filepath: '/images/user-1/ok.png',
+        type: 'image/png',
+        source: 'local',
+        context: 'image_generation',
+        bytes: 4,
+      },
+    ]);
+    const missing = Object.assign(
+      new Error(
+        "ENOENT: no such file or directory, open '/app/client/public/images/user-1/orphan.png'",
+      ),
+      { code: 'ENOENT' },
+    );
+    mockGetDownloadStream.mockImplementation(async (_req, filepath) => {
+      if (filepath.includes('orphan')) {
+        const stream = new Readable({
+          read() {
+            this.destroy(missing);
+          },
+        });
+        return stream;
+      }
+      return Readable.from([Buffer.from('flux')]);
+    });
+
+    const result = await resolveDocumentToolImages({
+      serverName: 'documents',
+      toolName: 'create_docx',
+      toolArguments: { blocks: [{ type: 'image', src: 'lc-file:latest' }] },
+      req,
+      user,
+    });
+
+    expect(result.blocks[0].src).toBe(
+      `data:image/png;base64,${Buffer.from('flux').toString('base64')}`,
+    );
+    expect(mockGetDownloadStream).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects missing storage without leaking absolute filesystem paths', async () => {
+    getFiles.mockResolvedValue([
+      {
+        user: user.id,
+        file_id: 'file_orphan',
+        filepath: '/images/user-1/orphan.png',
+        type: 'image/png',
+        source: 'local',
+        context: 'image_generation',
+        bytes: 12,
+      },
+    ]);
+    const missing = Object.assign(
+      new Error(
+        "ENOENT: no such file or directory, open '/app/client/public/images/user-1/orphan.png'",
+      ),
+      { code: 'ENOENT' },
+    );
+    mockGetDownloadStream.mockImplementation(async () => {
+      const stream = new Readable({
+        read() {
+          this.destroy(missing);
+        },
+      });
+      return stream;
+    });
+
+    await expect(
+      resolveDocumentToolImages({
+        serverName: 'documents',
+        toolName: 'create_docx',
+        toolArguments: { blocks: [{ type: 'image', src: 'lc-file:latest' }] },
+        req,
+        user,
+      }),
+    ).rejects.toThrow('No generated image found for this user');
+
+    await expect(
+      resolveDocumentToolImages({
+        serverName: 'documents',
+        toolName: 'create_docx',
+        toolArguments: { blocks: [{ type: 'image', src: 'lc-file:file_orphan' }] },
+        req,
+        user,
+      }),
+    ).rejects.toThrow('LibreChat image file is missing from storage');
+  });
+
   it('rejects stored images larger than 2 MB', async () => {
     getFiles.mockResolvedValue([
       {

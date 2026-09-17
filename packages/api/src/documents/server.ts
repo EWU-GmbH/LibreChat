@@ -8,6 +8,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { ContentBlock, DocumentInput, DocumentLayout, SheetInput } from './model';
 import { createDocx, createPdf, createXlsx } from './builders';
 import { resolveDocumentPath, storeDocument } from './storage';
+import { fetchUrl } from './fetch';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const STORAGE_DIRECTORY = process.env.DOCUMENT_STORAGE_PATH ?? '/data';
@@ -148,6 +149,29 @@ function documentResult(filename: string, url: string, bytes: number) {
   };
 }
 
+function fetchedPageResult(page: Awaited<ReturnType<typeof fetchUrl>>) {
+  const images = page.images.length
+    ? page.images.map((image) => `- ${image.alt ?? 'Bild'}: ${image.url}`).join('\n')
+    : '- Keine gefunden';
+  const colors = page.colors.length
+    ? page.colors.map((color) => `- ${color}`).join('\n')
+    : '- Keine';
+  const truncation = page.truncated ? '\n\nHinweis: Der Inhalt wurde am Größenlimit gekürzt.' : '';
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text:
+          `Quelle: ${page.url}\n` +
+          `Titel: ${page.title ?? 'Nicht angegeben'}\n\n` +
+          `## Seiteninhalt\n\n${page.markdown}\n\n` +
+          `## Bild-URLs\n\n${images}\n\n` +
+          `## Erkannte Farben\n\n${colors}${truncation}`,
+      },
+    ],
+  };
+}
+
 async function storeGeneratedFile(filename: string, extension: string, data: Buffer) {
   return storeDocument(
     STORAGE_DIRECTORY,
@@ -162,11 +186,21 @@ const toolGuide =
   '(Überschriften, Absätze, Listen, Tabellen, Linien, Abstände, Bilder). ' +
   'Für das zuletzt im Chat erzeugte Bild nutze im Bildblock `src: "lc-file:latest"`; ' +
   'für eine bekannte LibreChat-Datei `src: "lc-file:<file_id>"`. ' +
-  'Bilder als öffentliche https-URL oder data-URI (PNG/JPEG, max. 2 MB, max. 12 Stück). ' +
+  'Bilder als öffentliche https-URL (PNG/JPEG/WebP/SVG) oder PNG/JPEG-data-URI ' +
+  '(max. 2 MB, max. 12 Stück). ' +
   'Markdown in `content` bleibt möglich, inklusive ![alt](url).';
 
 function createMcpServer(): McpServer {
-  const server = new McpServer({ name: 'ewu-documents', version: '1.1.0' });
+  const server = new McpServer({ name: 'ewu-documents', version: '1.2.0' });
+
+  server.tool(
+    'fetch_url',
+    'Lädt den Inhalt einer ausdrücklich genannten öffentlichen URL als bereinigtes Markdown und liefert Bild-URLs sowie erkannte Farben. Nutze dieses Werkzeug statt web_search, wenn der Nutzer Inhalte, Farben oder ein Logo von einer konkreten URL übernehmen möchte. Danach kann im selben Chat create_docx, create_pdf oder create_xlsx verwendet werden.',
+    {
+      url: z.string().url().max(2048),
+    },
+    async ({ url }) => fetchedPageResult(await fetchUrl(url)),
+  );
 
   server.tool(
     'create_docx',

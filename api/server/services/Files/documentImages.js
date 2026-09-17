@@ -8,6 +8,24 @@ const DOCUMENT_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
 const DOCUMENT_SERVER_NAME = 'documents';
 const DOCUMENT_TOOLS = new Set(['create_docx', 'create_pdf']);
 const LATEST_REFERENCE = 'latest';
+const MISSING_STORAGE_CODES = new Set([
+  404,
+  '404',
+  'ENOENT',
+  'NoSuchKey',
+  'NotFound',
+  'ResourceNotFound',
+]);
+
+function isMissingStorageError(err) {
+  const code = err?.code ?? err?.status ?? err?.statusCode ?? err?.response?.status;
+  if (MISSING_STORAGE_CODES.has(code)) {
+    return true;
+  }
+  return /(?:file|object|blob|key|resource) (?:not found|does not exist)|no such (?:file|key)/i.test(
+    String(err?.message ?? ''),
+  );
+}
 
 async function readLimitedBuffer(stream, maxBytes) {
   const chunks = [];
@@ -24,9 +42,27 @@ async function readLimitedBuffer(stream, maxBytes) {
   return Buffer.concat(chunks);
 }
 
+async function readFileAsDataUri(file, req) {
+  if (file.bytes > MAX_DOCUMENT_IMAGE_BYTES) {
+    throw new Error('Document image exceeds 2 MB');
+  }
+
+  const source = file.source ?? FileSources.local;
+  const { getDownloadStream } = getStrategyFunctions(source);
+  if (!getDownloadStream) {
+    throw new Error('LibreChat image storage cannot be read');
+  }
+
+  const stream = await getDownloadStream(req, file.filepath);
+  const buffer = await readLimitedBuffer(stream, MAX_DOCUMENT_IMAGE_BYTES);
+  const type = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
+  return `data:${type};base64,${buffer.toString('base64')}`;
+}
+
 /**
  * Loads a user-owned LibreChat image as a data URI for document generation.
  * `latest` resolves the user's most recent generated image (e.g. Flux output).
+ * Orphaned Mongo metadata (missing storage bytes) is skipped for `latest`.
  *
  * @param {Object} params
  * @param {string} params.fileId
@@ -46,27 +82,30 @@ async function resolveDocumentImage({ fileId, req, user }) {
     filter.file_id = fileId;
   }
 
-  const [file] = (await getFiles(filter, { createdAt: -1 })) ?? [];
-  if (!file) {
+  const files = (await getFiles(filter, { createdAt: -1 })) ?? [];
+  if (!files.length) {
     throw new Error(
       fileId === LATEST_REFERENCE
         ? 'No generated image found for this user'
         : 'LibreChat image not found or access denied',
     );
   }
-  if (file.bytes > MAX_DOCUMENT_IMAGE_BYTES) {
-    throw new Error('Document image exceeds 2 MB');
+
+  for (const file of files) {
+    try {
+      return await readFileAsDataUri(file, req);
+    } catch (error) {
+      if (fileId === LATEST_REFERENCE && isMissingStorageError(error)) {
+        continue;
+      }
+      if (isMissingStorageError(error)) {
+        throw new Error('LibreChat image file is missing from storage');
+      }
+      throw error;
+    }
   }
 
-  const { getDownloadStream } = getStrategyFunctions(file.source ?? FileSources.local);
-  if (!getDownloadStream) {
-    throw new Error('LibreChat image storage cannot be read');
-  }
-
-  const stream = await getDownloadStream(req, file.filepath);
-  const buffer = await readLimitedBuffer(stream, MAX_DOCUMENT_IMAGE_BYTES);
-  const type = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
-  return `data:${type};base64,${buffer.toString('base64')}`;
+  throw new Error('No generated image found for this user');
 }
 
 /**
@@ -79,7 +118,7 @@ async function resolveDocumentImage({ fileId, req, user }) {
  * @param {Object | string} params.toolArguments
  * @param {ServerRequest} [params.req]
  * @param {IUser} [params.user]
- * @returns {Promise<Object | string>}
+ * @returns {Promise<object | string>}
  */
 async function resolveDocumentToolImages({ serverName, toolName, toolArguments, req, user }) {
   if (serverName !== DOCUMENT_SERVER_NAME || !DOCUMENT_TOOLS.has(toolName)) {
@@ -92,6 +131,7 @@ async function resolveDocumentToolImages({ serverName, toolName, toolArguments, 
 
 module.exports = {
   MAX_DOCUMENT_IMAGE_BYTES,
+  isMissingStorageError,
   resolveDocumentImage,
   resolveDocumentToolImages,
 };

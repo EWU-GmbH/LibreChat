@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { isIP } from 'node:net';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import type { Alignment, ContentBlock, ImageFormat, PreparedImage } from './model';
@@ -159,7 +160,7 @@ async function fetchHttpImage(src: string, deps: ImageLoaderDeps): Promise<Buffe
       method: 'GET',
       redirect: 'error',
       signal: controller.signal,
-      headers: { Accept: 'image/png,image/jpeg' },
+      headers: { Accept: 'image/*' },
     });
     if (!response.ok) {
       throw new Error(`Bild konnte nicht geladen werden (${response.status})`);
@@ -179,6 +180,25 @@ async function fetchHttpImage(src: string, deps: ImageLoaderDeps): Promise<Buffe
   }
 }
 
+async function normalizeImage(data: Buffer): Promise<{ data: Buffer; format: ImageFormat }> {
+  try {
+    return { data, format: detectImageFormat(data) };
+  } catch {
+    try {
+      const converted = await sharp(data, { failOn: 'error', limitInputPixels: 40_000_000 })
+        .resize({ width: 2400, height: 2400, fit: 'inside', withoutEnlargement: true })
+        .png()
+        .toBuffer();
+      if (converted.length === 0 || converted.length > MAX_IMAGE_BYTES) {
+        throw new Error('Konvertiertes Bild ist leer oder größer als 2 MB');
+      }
+      return { data: converted, format: 'png' };
+    } catch {
+      throw new Error('Nur gültige PNG-, JPEG-, WebP- und SVG-Bilder werden unterstützt');
+    }
+  }
+}
+
 export async function loadImageSource(
   src: string,
   widthMm: number | undefined,
@@ -186,8 +206,8 @@ export async function loadImageSource(
   align: Alignment | undefined,
   deps: ImageLoaderDeps = defaultDeps,
 ): Promise<PreparedImage> {
-  const data = src.startsWith('data:') ? parseDataUri(src) : await fetchHttpImage(src, deps);
-  const format = detectImageFormat(data);
+  const input = src.startsWith('data:') ? parseDataUri(src) : await fetchHttpImage(src, deps);
+  const { data, format } = await normalizeImage(input);
   const size = readImageSize(data, format);
   const width = Math.min(Math.max(widthMm ?? DEFAULT_IMAGE_WIDTH_MM, 10), 190);
   const ratio = size.height > 0 ? size.width / size.height : 1.5;
