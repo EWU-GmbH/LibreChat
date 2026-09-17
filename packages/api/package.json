@@ -94,7 +94,6 @@
     "sanitize-html": "^2.13.0",
     "ts-node": "^10.9.2",
     "tsdown": "^0.22.2",
-    "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "yauzl": "^3.2.1"
@@ -169,6 +168,7 @@
   "dependencies": {
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
-    "pdfkit": "^0.20.2"
+    "pdfkit": "^0.20.2",
+    "tsx": "^4.23.13"
   }
 }

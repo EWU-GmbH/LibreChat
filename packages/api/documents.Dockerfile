@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN npm ci --workspace @librechat/api --include-workspace-root=false
+RUN npm ci --omit=dev --workspace @librechat/api --include-workspace-root=false
 
 ENV NODE_ENV=production
 ENV PORT=3000
