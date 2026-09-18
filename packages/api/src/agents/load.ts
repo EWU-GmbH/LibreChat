@@ -7,6 +7,7 @@ import {
   encodeEphemeralAgentId,
 } from 'librechat-data-provider';
 import type {
+  AgentToolOptions,
   AgentModelParameters,
   TEphemeralAgent,
   UserMCPAccess,
@@ -49,31 +50,68 @@ async function getSelectedMCPTools(
   serverNames: Iterable<string>,
   deps: LoadAgentDeps,
 ): Promise<string[]> {
-  const tools: string[] = [];
   const userId = req.user?.id ?? '';
+  const uniqueServers = [...new Set(serverNames)];
 
-  for (const serverName of new Set(serverNames)) {
-    if (!canAccessMCPServer(req.user, serverName)) {
-      logger.warn(
-        `[getSelectedMCPTools] Denied MCP server '${serverName}' for user ${userId} (mcpAccess policy)`,
-      );
+  const results = await Promise.allSettled(
+    uniqueServers.map(async (serverName) => {
+      if (!canAccessMCPServer(req.user, serverName)) {
+        logger.warn(
+          `[getSelectedMCPTools] Denied MCP server '${serverName}' for user ${userId} (mcpAccess policy)`,
+        );
+        return [] as string[];
+      }
+
+      const overlayConfig = req.config?.mcpConfig?.[serverName];
+      const serverTools =
+        overlayConfig && requiresEphemeralUserConnection(overlayConfig)
+          ? null
+          : await deps.getMCPServerTools(userId, serverName);
+
+      if (!serverTools) {
+        return [`${mcp_all}${mcp_delimiter}${serverName}`];
+      }
+      return Object.keys(serverTools);
+    }),
+  );
+
+  const tools: string[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.status === 'fulfilled') {
+      tools.push(...result.value);
       continue;
     }
-
-    const overlayConfig = req.config?.mcpConfig?.[serverName];
-    const serverTools =
-      overlayConfig && requiresEphemeralUserConnection(overlayConfig)
-        ? null
-        : await deps.getMCPServerTools(userId, serverName);
-
-    if (!serverTools) {
-      tools.push(`${mcp_all}${mcp_delimiter}${serverName}`);
-      continue;
-    }
-    tools.push(...Object.keys(serverTools));
+    logger.warn(
+      `[getSelectedMCPTools] Failed to load tools for '${uniqueServers[i]}':`,
+      result.reason,
+    );
   }
 
   return tools;
+}
+
+function applyDeferredMcpToolOptions(
+  agent: Agent,
+  mcpToolNames: string[],
+  selectedServerCount: number,
+): Agent {
+  if (selectedServerCount <= 1 || mcpToolNames.length === 0) {
+    return agent;
+  }
+
+  const tool_options: AgentToolOptions = { ...(agent.tool_options ?? {}) };
+  for (const name of mcpToolNames) {
+    tool_options[name] = {
+      ...tool_options[name],
+      defer_loading: true,
+    };
+  }
+
+  return {
+    ...agent,
+    tool_options,
+  };
 }
 
 /**
@@ -108,6 +146,7 @@ export async function loadEphemeralAgent(
   }
 
   tools.push(...(await getSelectedMCPTools(req, mcpServers, deps)));
+  tools.push(Tools.request_mcp);
 
   const requestPromptPrefix = req.body?.promptPrefix;
   const { promptPrefix: modelPromptPrefix, ...safeModelParameters } =
@@ -168,7 +207,11 @@ export async function loadEphemeralAgent(
       result.skills = [];
     }
   }
-  return result as Agent;
+  return applyDeferredMcpToolOptions(
+    result as Agent,
+    tools.filter((tool) => tool.includes(mcp_delimiter)),
+    mcpServers.size,
+  );
 }
 
 /**
@@ -198,22 +241,25 @@ export async function loadAgent(
   agentWithVersion.version = agentWithVersion.versions ? agentWithVersion.versions.length : 0;
 
   const baselineTools = (agent.tools ?? []).filter((tool) => !tool.includes(mcp_delimiter));
-  const selectedServers = req.body?.ephemeralAgent?.mcp?.slice(-1) ?? [];
+  const selectedServers = [...new Set(req.body?.ephemeralAgent?.mcp ?? [])];
   if (selectedServers.length === 0) {
-    return baselineTools.length === agent.tools?.length
-      ? agent
-      : {
-          ...agent,
-          tools: baselineTools,
-        };
+    return {
+      ...agent,
+      tools: [...baselineTools, Tools.request_mcp],
+    };
   }
 
   const selectedTools = await getSelectedMCPTools(req, selectedServers, deps);
   const tools = new Set(baselineTools);
   selectedTools.forEach((tool) => tools.add(tool));
+  tools.add(Tools.request_mcp);
 
-  return {
-    ...agent,
-    tools: Array.from(tools),
-  };
+  return applyDeferredMcpToolOptions(
+    {
+      ...agent,
+      tools: Array.from(tools),
+    },
+    selectedTools,
+    selectedServers.length,
+  );
 }

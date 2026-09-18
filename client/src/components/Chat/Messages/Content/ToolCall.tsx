@@ -3,6 +3,7 @@ import { useRecoilValue } from 'recoil';
 import { Button } from '@librechat/client';
 import { TriangleAlert } from 'lucide-react';
 import {
+  Tools,
   Constants,
   dataService,
   actionDelimiter,
@@ -11,6 +12,7 @@ import {
 import type { TAttachment } from 'librechat-data-provider';
 import { useLocalize, useProgress, useExpandCollapse } from '~/hooks';
 import { ToolIcon, getToolIconType, isError } from './ToolOutput';
+import RequestMcpEnableButton from './RequestMcpEnableButton';
 import { useMCPIconMap } from '~/hooks/MCP';
 import { AttachmentGroup } from './Parts';
 import ToolCallInfo from './ToolCallInfo';
@@ -250,6 +252,9 @@ export default function ToolCall({
           )}
         </div>
       </div>
+      {name === Tools.request_mcp && (
+        <RequestMcpEnableButton args={_args} output={output} />
+      )}
       {auth != null && auth && progress < 1 && !showCancelled && (
         <div className="flex w-full flex-col gap-2.5">
           <div className="mb-1 mt-2">

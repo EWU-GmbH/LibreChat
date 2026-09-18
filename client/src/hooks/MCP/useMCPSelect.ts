@@ -11,10 +11,18 @@ import { setTimestamp } from '~/utils/timestamps';
 /** Sentinel in `interface.defaultPinnedTools` that pins the MCP dropdown to the prompt bar. */
 const MCP_PIN_KEYWORD = 'mcp';
 
-/** The chat picker is intentionally exclusive; the most recent selection wins. */
+/** Deduplicate server names while preserving selection order. */
 export function normalizeMCPSelection(value: string[]): string[] {
-  const selectedServer = value[value.length - 1];
-  return selectedServer ? [selectedServer] : [];
+  const seen = new Set<string>();
+  const selected: string[] = [];
+  for (const name of value) {
+    if (typeof name !== 'string' || name.length === 0 || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    selected.push(name);
+  }
+  return selected;
 }
 
 export function useMCPSelect({

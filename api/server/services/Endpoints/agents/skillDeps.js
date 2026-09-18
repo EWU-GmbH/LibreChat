@@ -13,6 +13,7 @@ const {
   resolveRequestTenantId,
   enrichWithSkillConfigurable,
   mergeDeploymentSkillIds,
+  mergeMcpSkillIds,
   createDeploymentSkillMethods,
   isDeploymentSkillFileSource,
   getDeploymentSkillDownloadStream,
@@ -47,7 +48,7 @@ function getSkillDbMethods() {
 }
 
 function withDeploymentSkillIds(ids = []) {
-  return mergeDeploymentSkillIds(ids);
+  return mergeMcpSkillIds(mergeDeploymentSkillIds(ids));
 }
 
 function getSkillStrategyFunctions(source) {

@@ -6,7 +6,7 @@ import { RecoilRoot, useRecoilState, useRecoilValue, useSetRecoilState } from 'r
 import { MCPServerDefinition } from '../useMCPServerManager';
 import { ephemeralAgentByConvoId } from '~/store';
 import { setTimestamp } from '~/utils/timestamps';
-import { useMCPSelect } from '../useMCPSelect';
+import { normalizeMCPSelection, useMCPSelect } from '../useMCPSelect';
 
 // Mock dependencies
 jest.mock('~/utils/timestamps', () => ({
@@ -53,6 +53,15 @@ describe('useMCPSelect', () => {
     jest.clearAllMocks();
     localStorage.clear();
     mockStartupConfig = undefined;
+  });
+
+  describe('normalizeMCPSelection', () => {
+    it('keeps every unique server name in order', () => {
+      expect(normalizeMCPSelection(['server1', 'server2', 'server1', ''])).toEqual([
+        'server1',
+        'server2',
+      ]);
+    });
   });
 
   describe('Basic Functionality', () => {
@@ -102,7 +111,7 @@ describe('useMCPSelect', () => {
       });
 
       await waitFor(() => {
-        expect(result.current.mcpValues).toEqual(['value2']);
+        expect(result.current.mcpValues).toEqual(['value1', 'value2']);
       });
     });
 
@@ -329,8 +338,8 @@ describe('useMCPSelect', () => {
 
       // The hook should sync with the external update
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['external-value2']);
-        expect(result.current.ephemeralAgent?.mcp).toEqual(['external-value2']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['external-value1', 'external-value2']);
+        expect(result.current.ephemeralAgent?.mcp).toEqual(['external-value1', 'external-value2']);
       });
     });
 
@@ -352,7 +361,7 @@ describe('useMCPSelect', () => {
       });
 
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['server2']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['server1', 'server2']);
       });
     });
 
@@ -378,7 +387,7 @@ describe('useMCPSelect', () => {
       });
     });
 
-    it('should keep only the latest MCP when all are configured', async () => {
+    it('should keep every configured MCP when several are selected', async () => {
       const { Wrapper, servers } = createWrapper(['server1', 'server2', 'server3']);
 
       const TestComponent = () => {
@@ -396,7 +405,7 @@ describe('useMCPSelect', () => {
       });
 
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['server2']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['server1', 'server2']);
       });
     });
 
@@ -421,8 +430,8 @@ describe('useMCPSelect', () => {
 
       // Verify both mcpValues and ephemeralAgent are updated
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['hook-value2']);
-        expect(result.current.ephemeralAgent?.mcp).toEqual(['hook-value2']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['hook-value1', 'hook-value2']);
+        expect(result.current.ephemeralAgent?.mcp).toEqual(['hook-value1', 'hook-value2']);
       });
     });
 
@@ -481,7 +490,7 @@ describe('useMCPSelect', () => {
       });
 
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['server2']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['server1', 'server2']);
       });
 
       // Reset ephemeralAgent to null (simulating non-spec reset)
@@ -492,7 +501,7 @@ describe('useMCPSelect', () => {
       // mcpValues should remain unchanged since null ephemeral agent
       // doesn't trigger the sync effect (mcps.length === 0)
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['server2']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['server1', 'server2']);
       });
     });
 
@@ -524,7 +533,7 @@ describe('useMCPSelect', () => {
 
       // Should sync since it's non-empty
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['value2']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['value1', 'value2']);
       });
 
       // Update with different non-empty values
@@ -537,7 +546,7 @@ describe('useMCPSelect', () => {
 
       // Should sync the new values
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['value5']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['value3', 'value4', 'value5']);
       });
     });
   });
@@ -587,7 +596,7 @@ describe('useMCPSelect', () => {
       expect(executionTime).toBeLessThan(100);
 
       await waitFor(() => {
-        expect(result.current.mcpValues).toEqual(['value-999']);
+        expect(result.current.mcpValues).toEqual(largeArray);
       });
     });
 
@@ -646,7 +655,7 @@ describe('useMCPSelect', () => {
       });
 
       await waitFor(() => {
-        expect(result.current.mcpValues).toEqual(['server2']);
+        expect(result.current.mcpValues).toEqual(['server1', 'server2']);
       });
 
       // Verify timestamp was written to the conversation key, not the environment key
@@ -670,7 +679,7 @@ describe('useMCPSelect', () => {
       await waitFor(() => {
         // Verify dual-write to environment key
         const envKey = `${LocalStorageKeys.LAST_MCP_}${storageContextKey}`;
-        expect(localStorage.getItem(envKey)).toEqual(JSON.stringify(['server2']));
+        expect(localStorage.getItem(envKey)).toEqual(JSON.stringify(['server1', 'server2']));
         expect(setTimestamp).toHaveBeenCalledWith(envKey);
       });
     });
@@ -711,7 +720,7 @@ describe('useMCPSelect', () => {
       });
 
       await waitFor(() => {
-        expect(newConvoResult.current.mcpValues).toEqual(['server2']);
+        expect(newConvoResult.current.mcpValues).toEqual(['server1', 'server2']);
       });
 
       // Existing conversation should have its own isolated state
@@ -733,7 +742,7 @@ describe('useMCPSelect', () => {
       });
 
       // New conversation defaults should be unchanged
-      expect(newConvoResult.current.mcpValues).toEqual(['server2']);
+      expect(newConvoResult.current.mcpValues).toEqual(['server1', 'server2']);
     });
   });
 
@@ -758,7 +767,7 @@ describe('useMCPSelect', () => {
       });
 
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['server2']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['server1', 'server2']);
       });
 
       // Simulate switching to a spec with no MCP — ephemeral agent gets mcp: []
@@ -792,7 +801,7 @@ describe('useMCPSelect', () => {
       });
 
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['spec-server2']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['spec-server1', 'spec-server2']);
       });
     });
 
@@ -813,7 +822,7 @@ describe('useMCPSelect', () => {
       });
 
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['server2']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['server1', 'server2']);
       });
 
       // Reset ephemeral agent to null (switching to non-spec)
@@ -824,7 +833,7 @@ describe('useMCPSelect', () => {
       // mcpValues should remain unchanged — null ephemeral agent doesn't trigger sync
       // (BadgeRowContext will fill from localStorage defaults separately)
       await waitFor(() => {
-        expect(result.current.mcpHook.mcpValues).toEqual(['server2']);
+        expect(result.current.mcpHook.mcpValues).toEqual(['server1', 'server2']);
       });
     });
   });

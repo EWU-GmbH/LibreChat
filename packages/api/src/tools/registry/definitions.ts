@@ -1,4 +1,5 @@
 import { WebSearchToolDefinition, CalculatorToolDefinition } from '@librechat/agents';
+import { RequestMcpToolDefinition } from '~/tools/requestMcp';
 import { geminiToolkit } from '~/tools/toolkits/gemini';
 import { oaiToolkit } from '~/tools/toolkits/oai';
 
@@ -469,6 +470,12 @@ const agentToolDefinitions: Record<string, ToolRegistryDefinition> = {
     name: WebSearchToolDefinition.name,
     description: WebSearchToolDefinition.description,
     schema: WebSearchToolDefinition.schema as unknown as ExtendedJsonSchema,
+    toolType: 'builtin',
+  },
+  [RequestMcpToolDefinition.name]: {
+    name: RequestMcpToolDefinition.name,
+    description: RequestMcpToolDefinition.description,
+    schema: RequestMcpToolDefinition.schema as unknown as ExtendedJsonSchema,
     toolType: 'builtin',
   },
 };

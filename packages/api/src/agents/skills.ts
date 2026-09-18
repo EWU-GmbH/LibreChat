@@ -8,6 +8,7 @@ import type { Agent } from 'librechat-data-provider';
 import type { Types } from 'mongoose';
 import type { InitializeAgentDbMethods } from './initialize';
 import { registerCodeExecutionTools } from './tools';
+import { getMcpSkillIds } from '~/skills/mcp';
 import { logAxiosError } from '~/utils';
 
 const SKILL_CATALOG_LIMIT = 100;
@@ -225,6 +226,8 @@ export interface ResolveAgentScopedSkillIdsParams {
   skillsCapabilityEnabled: boolean;
   /** Per-conversation skills badge toggle (`req.body.ephemeralAgent.skills`). */
   ephemeralSkillsToggle: boolean;
+  /** Auto-generated MCP stub skill IDs always shown in ephemeral chats. */
+  mcpSkillIds?: Types.ObjectId[];
 }
 
 /**
@@ -245,26 +248,63 @@ export interface ResolveAgentScopedSkillIdsParams {
  * would fall through to the "full catalog" branch of `scopeSkillIds`,
  * exposing the skill tool on runs where the author never opted in.
  */
+function uniqueSkillIds(ids: Types.ObjectId[]): Types.ObjectId[] {
+  const seen = new Set<string>();
+  const unique: Types.ObjectId[] = [];
+  for (const id of ids) {
+    const key = id.toString();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(id);
+  }
+  return unique;
+}
+
+function accessibleMcpSkillIds(
+  accessibleSkillIds: Types.ObjectId[],
+  mcpSkillIds: Types.ObjectId[] | undefined,
+): Types.ObjectId[] {
+  if (!mcpSkillIds?.length) {
+    return [];
+  }
+  const accessible = new Set(accessibleSkillIds.map((id) => id.toString()));
+  return mcpSkillIds.filter((id) => accessible.has(id.toString()));
+}
+
 export function resolveAgentScopedSkillIds(
   params: ResolveAgentScopedSkillIdsParams,
 ): Types.ObjectId[] {
-  const { agent, accessibleSkillIds, skillsCapabilityEnabled, ephemeralSkillsToggle } = params;
+  const {
+    agent,
+    accessibleSkillIds,
+    skillsCapabilityEnabled,
+    ephemeralSkillsToggle,
+    mcpSkillIds,
+  } = params;
   if (!skillsCapabilityEnabled || accessibleSkillIds.length === 0) {
     return [];
   }
+  const mcpIds = accessibleMcpSkillIds(
+    accessibleSkillIds,
+    mcpSkillIds ?? getMcpSkillIds(),
+  );
   if (isEphemeralAgentId(agent.id)) {
     if (agent.skills_enabled === false) {
-      return [];
+      return mcpIds;
     }
     if (agent.skills_enabled === true) {
       if (Array.isArray(agent.skills) && agent.skills.length === 0) {
-        return [];
+        return mcpIds;
       }
-      return Array.isArray(agent.skills)
+      const scoped = Array.isArray(agent.skills)
         ? scopeSkillIds(accessibleSkillIds, agent.skills)
         : scopeSkillIds(accessibleSkillIds, undefined);
+      return uniqueSkillIds([...scoped, ...mcpIds]);
     }
-    return ephemeralSkillsToggle ? scopeSkillIds(accessibleSkillIds, undefined) : [];
+    const toggled = ephemeralSkillsToggle ? scopeSkillIds(accessibleSkillIds, undefined) : [];
+    return uniqueSkillIds([...toggled, ...mcpIds]);
   }
   if (agent.skills_enabled !== true) {
     return [];

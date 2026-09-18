@@ -11,6 +11,8 @@ const {
   buildWebSearchContext,
   canAccessMCPServer,
   buildWebSearchDynamicContext,
+  createRequestMcpTool,
+  resolveRequestableMcpServers,
 } = require('@librechat/api');
 const {
   Tools,
@@ -358,6 +360,14 @@ const loadTools = async ({
           logger,
         });
       };
+      continue;
+    } else if (tool === Tools.request_mcp) {
+      const availableServers = resolveRequestableMcpServers({
+        mcpConfig: options.req?.config?.mcpConfig,
+        selectedServers: options.req?.body?.ephemeralAgent?.mcp,
+        user: options.req?.user,
+      });
+      requestedTools[tool] = async () => createRequestMcpTool({ availableServers });
       continue;
     } else if (tool && mcpToolPattern.test(tool)) {
       if (!canUseMCP) {

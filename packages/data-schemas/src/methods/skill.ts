@@ -262,6 +262,7 @@ const ALLOWED_FRONTMATTER_KEYS = new Set<string>([
   'version',
   'license',
   'metadata',
+  'mcp-servers',
 ]);
 
 const FRONTMATTER_MAX_STRING = 2000;
@@ -289,6 +290,7 @@ const FRONTMATTER_KIND: Record<string, FrontmatterKind | FrontmatterKind[]> = {
   shell: 'string',
   version: 'string',
   license: 'string',
+  'mcp-servers': ['string', 'stringArray'],
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -480,7 +482,7 @@ export type CreateSkillInput = {
   category?: string;
   author: Types.ObjectId;
   authorName: string;
-  source?: 'inline' | 'github' | 'notion';
+  source?: 'inline' | 'github' | 'notion' | 'mcp';
   sourceMetadata?: Record<string, unknown>;
   /**
    * When `true`, the skill is auto-primed into every turn. Callers pass this
@@ -499,7 +501,7 @@ export type UpdateSkillInput = {
   frontmatter?: Record<string, unknown>;
   category?: string;
   alwaysApply?: boolean;
-  source?: 'inline' | 'github' | 'notion';
+  source?: 'inline' | 'github' | 'notion' | 'mcp';
   sourceMetadata?: Record<string, unknown>;
 };
 
@@ -525,6 +527,7 @@ export function deriveStructuredFrontmatterFields(
   disableModelInvocation?: boolean;
   userInvocable?: boolean;
   allowedTools?: string[];
+  mcpServers?: string[];
 } {
   if (!frontmatter || typeof frontmatter !== 'object') {
     return {};
@@ -533,6 +536,7 @@ export function deriveStructuredFrontmatterFields(
     disableModelInvocation?: boolean;
     userInvocable?: boolean;
     allowedTools?: string[];
+    mcpServers?: string[];
   } = {};
   const disableModelInvocationRaw = frontmatter['disable-model-invocation'];
   if (typeof disableModelInvocationRaw === 'boolean') {
@@ -556,6 +560,16 @@ export function deriveStructuredFrontmatterFields(
     }
   } else if (Array.isArray(allowedToolsRaw)) {
     derived.allowedTools = allowedToolsRaw.filter(
+      (entry): entry is string => typeof entry === 'string' && entry.length > 0,
+    );
+  }
+  const mcpServersRaw = frontmatter['mcp-servers'];
+  if (typeof mcpServersRaw === 'string') {
+    if (mcpServersRaw.length > 0) {
+      derived.mcpServers = [mcpServersRaw];
+    }
+  } else if (Array.isArray(mcpServersRaw)) {
+    derived.mcpServers = mcpServersRaw.filter(
       (entry): entry is string => typeof entry === 'string' && entry.length > 0,
     );
   }
@@ -584,6 +598,7 @@ export function backfillDerivedFromFrontmatter<
     disableModelInvocation?: boolean;
     userInvocable?: boolean;
     allowedTools?: string[];
+    mcpServers?: string[];
   },
 >(skill: T | null): T | null {
   if (!skill || !skill.frontmatter) {
@@ -598,6 +613,9 @@ export function backfillDerivedFromFrontmatter<
   }
   if (skill.allowedTools === undefined && derived.allowedTools !== undefined) {
     skill.allowedTools = derived.allowedTools;
+  }
+  if (skill.mcpServers === undefined && derived.mcpServers !== undefined) {
+    skill.mcpServers = derived.mcpServers;
   }
   return skill;
 }
@@ -1234,7 +1252,7 @@ export function createSkillMethods(
          still called below as defensive code; it short-circuits when
          `frontmatter` is undefined. */
       .select(
-        'name displayTitle description category author authorName version source sourceMetadata fileCount alwaysApply tenantId disableModelInvocation userInvocable allowedTools createdAt updatedAt',
+        'name displayTitle description category author authorName version source sourceMetadata fileCount alwaysApply tenantId disableModelInvocation userInvocable allowedTools mcpServers createdAt updatedAt',
       )
       .lean();
 
@@ -1402,7 +1420,12 @@ export function createSkillMethods(
        * from a SKILL.md re-enables model invocation on the next save.
        */
       const derived = deriveStructuredFrontmatterFields(update.frontmatter);
-      for (const key of ['disableModelInvocation', 'userInvocable', 'allowedTools'] as const) {
+      for (const key of [
+        'disableModelInvocation',
+        'userInvocable',
+        'allowedTools',
+        'mcpServers',
+      ] as const) {
         if (derived[key] !== undefined) {
           setPayload[key] = derived[key];
         } else {

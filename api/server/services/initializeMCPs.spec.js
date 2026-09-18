@@ -54,6 +54,10 @@ jest.mock('~/config', () => ({
   },
 }));
 
+jest.mock('@librechat/api', () => ({
+  syncMcpSkills: jest.fn().mockResolvedValue([]),
+}));
+
 const { logger } = require('@librechat/data-schemas');
 const initializeMCPs = require('./initializeMCPs');
 

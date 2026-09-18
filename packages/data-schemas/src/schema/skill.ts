@@ -159,6 +159,10 @@ const skillSchema: Schema<ISkillDocument> = new Schema(
       type: [String],
       default: undefined,
     },
+    mcpServers: {
+      type: [String],
+      default: undefined,
+    },
     category: {
       type: String,
       default: '',
@@ -185,10 +189,11 @@ const skillSchema: Schema<ISkillDocument> = new Schema(
      * - `inline` — authored directly inside LibreChat.
      * - `github` — mirrored from a configured GitHub skill sync source.
      * - `notion` — reserved for future external sync integrations.
+     * - `mcp` — auto-generated stub for a configured chat MCP server.
      */
     source: {
       type: String,
-      enum: ['inline', 'github', 'notion'],
+      enum: ['inline', 'github', 'notion', 'mcp'],
       default: 'inline',
     },
     /**

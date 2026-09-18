@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const { logger } = require('@librechat/data-schemas');
 const { mergeAppTools, getAppConfig } = require('./Config');
 const { createMCPServersRegistry, createMCPManager } = require('~/config');
+const { syncMcpSkills } = require('@librechat/api');
 
 /**
  * Resolves the current request's effective MCP allowlists from the merged (tenant-scoped)
@@ -48,8 +49,10 @@ async function initializeMCPs() {
       logger.info(
         `[MCP] Initialized with ${serverCount} configured ${serverCount === 1 ? 'server' : 'servers'} and ${toolCount} ${toolCount === 1 ? 'tool' : 'tools'}.`,
       );
+      await syncMcpSkills(mcpServers);
     } else {
       logger.debug('[MCP] No servers configured. MCPManager ready for UI-based servers.');
+      await syncMcpSkills({});
     }
   } catch (error) {
     logger.error('[MCP] Failed to initialize MCPManager:', error);

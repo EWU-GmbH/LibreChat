@@ -391,7 +391,18 @@ describe('skill validation helpers', () => {
       expect(deriveStructuredFrontmatterFields({})).toEqual({});
     });
 
-    it('normalizes a string allowed-tools to a one-element array', () => {
+    it('normalizes mcp-servers from a string or array', () => {
+      expect(deriveStructuredFrontmatterFields({ 'mcp-servers': 'formbricks' })).toEqual({
+        mcpServers: ['formbricks'],
+      });
+      expect(
+        deriveStructuredFrontmatterFields({ 'mcp-servers': ['formbricks', 'dataforseo'] }),
+      ).toEqual({
+        mcpServers: ['formbricks', 'dataforseo'],
+      });
+    });
+
+    it('normalizes a string allowed-tools into a single-element array', () => {
       expect(deriveStructuredFrontmatterFields({ 'allowed-tools': 'web_search' })).toEqual({
         allowedTools: ['web_search'],
       });

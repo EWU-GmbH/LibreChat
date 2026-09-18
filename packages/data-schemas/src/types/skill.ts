@@ -64,6 +64,11 @@ export interface ISkill {
    * the model picks a skill should add it to `agent.tools` directly.
    */
   allowedTools?: string[];
+  /**
+   * MCP server names this skill describes. Used to request activation
+   * when the chat has not selected those servers yet.
+   */
+  mcpServers?: string[];
   category?: string;
   author: Types.ObjectId;
   authorName: string;
@@ -73,8 +78,9 @@ export interface ISkill {
    * - `inline` — authored inside LibreChat.
    * - `github` — mirrored from a configured GitHub skill sync source.
    * - `notion` — reserved for future external sync integrations.
+   * - `mcp` — auto-generated stub for a configured chat MCP server.
    */
-  source: 'inline' | 'github' | 'notion';
+  source: 'inline' | 'github' | 'notion' | 'mcp';
   /**
    * Provenance payload keyed by `source`, including upstream identifiers
    * such as GitHub source id, path, and commit/blob SHAs.

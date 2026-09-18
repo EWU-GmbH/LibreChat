@@ -357,6 +357,19 @@ describe('resolveAgentScopedSkillIds', () => {
       ).toEqual([]);
     });
 
+    it('still includes MCP stub skills when the skills badge is off', () => {
+      const catalog = makeId();
+      const mcp = makeId();
+      const scoped = resolveAgentScopedSkillIds({
+        agent: ephemeralAgent(),
+        accessibleSkillIds: [catalog, mcp],
+        skillsCapabilityEnabled: true,
+        ephemeralSkillsToggle: false,
+        mcpSkillIds: [mcp],
+      });
+      expect(scoped.map((o) => o.toString())).toEqual([mcp.toString()]);
+    });
+
     it('returns the full accessible catalog when the skills badge toggle is on', () => {
       const a = makeId();
       const b = makeId();

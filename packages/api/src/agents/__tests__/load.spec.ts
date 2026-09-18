@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { Constants, FileSources } from 'librechat-data-provider';
+import { Constants, FileSources, Tools } from 'librechat-data-provider';
 import { agentSchema, createMethods } from '@librechat/data-schemas';
 import type {
   Agent as LibreChatAgent,
@@ -124,6 +124,9 @@ describe('loadAgent', () => {
       expect(result.tools).toContain('web_search');
       expect(result.tools).toContain('tool1_mcp_server1');
       expect(result.tools).toContain('tool2_mcp_server2');
+      expect(result.tools).toContain(Tools.request_mcp);
+      expect(result.tool_options?.tool1_mcp_server1?.defer_loading).toBe(true);
+      expect(result.tool_options?.tool2_mcp_server2?.defer_loading).toBe(true);
     } else {
       expect(result).toBeNull();
     }
@@ -240,7 +243,7 @@ describe('loadAgent', () => {
     );
 
     expect(mockGetMCPServerTools).not.toHaveBeenCalled();
-    expect(result?.tools).toEqual(['web_search']);
+    expect(result?.tools).toEqual(['web_search', Tools.request_mcp]);
   });
 
   test('should add only chat-selected MCP server tools to a persistent agent', async () => {
@@ -283,6 +286,7 @@ describe('loadAgent', () => {
       'web_search',
       'docs_search_mcp_dataforseo',
       'api_request_mcp_dataforseo',
+      Tools.request_mcp,
     ]);
     expect(result?.tools).not.toContain('list_surveys_mcp_formbricks');
   });
@@ -324,10 +328,11 @@ describe('loadAgent', () => {
 
     const formbricksLeft = (result?.tools ?? []).filter((t) => t.includes('formbricks'));
     expect(formbricksLeft).toEqual([]);
-    expect(result?.tools).toEqual(['web_search', 'tool_mcp_dataforseo']);
+    expect(result?.tools).toEqual(['web_search', 'tool_mcp_dataforseo', Tools.request_mcp]);
+    expect(result?.tool_options?.tool_mcp_dataforseo?.defer_loading).toBeUndefined();
   });
 
-  test('should load only the most recently selected MCP server for a persistent agent', async () => {
+  test('should load every selected MCP server for a persistent agent', async () => {
     const userId = new mongoose.Types.ObjectId();
     const agentId = `agent_${uuidv4()}`;
 
@@ -355,9 +360,54 @@ describe('loadAgent', () => {
       deps,
     );
 
-    expect(mockGetMCPServerTools).toHaveBeenCalledTimes(1);
-    expect(mockGetMCPServerTools).toHaveBeenCalledWith(userId.toString(), 'dataforseo');
-    expect(result?.tools).toEqual(['web_search', 'tool_mcp_dataforseo']);
+    expect(mockGetMCPServerTools).toHaveBeenCalledTimes(2);
+    expect(result?.tools).toEqual(
+      expect.arrayContaining([
+        'web_search',
+        'tool_mcp_formbricks',
+        'tool_mcp_dataforseo',
+        Tools.request_mcp,
+      ]),
+    );
+    expect(result?.tool_options?.tool_mcp_formbricks?.defer_loading).toBe(true);
+    expect(result?.tool_options?.tool_mcp_dataforseo?.defer_loading).toBe(true);
+  });
+
+  test('should keep remaining MCP tools when one server fetch fails', async () => {
+    const userId = new mongoose.Types.ObjectId();
+    const agentId = `agent_${uuidv4()}`;
+
+    await createAgent({
+      id: agentId,
+      name: 'Persistent Agent',
+      provider: 'openai',
+      model: 'gpt-4',
+      author: userId,
+      tools: ['web_search'],
+    });
+    mockGetMCPServerTools.mockImplementation(async (_userId: string, server: string) => {
+      if (server === 'formbricks') {
+        throw new Error('timeout');
+      }
+      return { [`tool_mcp_${server}`]: {} };
+    });
+
+    const result = await loadAgent(
+      {
+        req: {
+          user: { id: userId.toString() },
+          body: { ephemeralAgent: { mcp: ['formbricks', 'dataforseo'] } },
+        },
+        agent_id: agentId,
+        endpoint: 'agents',
+      },
+      deps,
+    );
+
+    expect(result?.tools).toEqual(
+      expect.arrayContaining(['web_search', 'tool_mcp_dataforseo', Tools.request_mcp]),
+    );
+    expect(result?.tools).not.toContain('tool_mcp_formbricks');
   });
 
   test('should reject crafted ephemeralAgent.mcp servers outside user mcpAccess allowlist', async () => {
@@ -393,7 +443,7 @@ describe('loadAgent', () => {
     );
 
     expect(mockGetMCPServerTools).not.toHaveBeenCalled();
-    expect(result?.tools).toEqual(['web_search']);
+    expect(result?.tools).toEqual(['web_search', Tools.request_mcp]);
     expect((result?.tools ?? []).some((t) => t.includes('listmonk'))).toBe(false);
   });
 
@@ -430,7 +480,7 @@ describe('loadAgent', () => {
     );
 
     expect(mockGetMCPServerTools).toHaveBeenCalledWith(userId.toString(), 'dataforseo');
-    expect(result?.tools).toEqual(['web_search', 'tool_mcp_dataforseo']);
+    expect(result?.tools).toEqual(['web_search', 'tool_mcp_dataforseo', Tools.request_mcp]);
   });
 
   test('should use all-tools expansion for a selected request-scoped MCP server', async () => {
@@ -471,6 +521,7 @@ describe('loadAgent', () => {
     expect(result?.tools).toEqual([
       'web_search',
       `${Constants.mcp_all}${Constants.mcp_delimiter}scoped`,
+      Tools.request_mcp,
     ]);
   });
 

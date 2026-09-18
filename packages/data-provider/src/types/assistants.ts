@@ -27,6 +27,7 @@ export enum Tools {
   skill = 'skill',
   read_file = 'read_file',
   bash_tool = 'bash_tool',
+  request_mcp = 'request_mcp',
 }
 
 export enum EToolResources {
