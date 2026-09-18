@@ -445,6 +445,19 @@ describe('resolveAgentScopedSkillIds', () => {
       ).toEqual([]);
     });
 
+    it('still includes MCP stub skills when `skills_enabled` is undefined', () => {
+      const catalog = makeId();
+      const mcp = makeId();
+      const scoped = resolveAgentScopedSkillIds({
+        agent: persistedAgent([catalog.toString()], undefined),
+        accessibleSkillIds: [catalog, mcp],
+        skillsCapabilityEnabled: true,
+        ephemeralSkillsToggle: false,
+        mcpSkillIds: [mcp],
+      });
+      expect(scoped.map((o) => o.toString())).toEqual([mcp.toString()]);
+    });
+
     it('returns [] when `skills_enabled` is false, even if an allowlist is set', () => {
       const a = makeId();
       expect(
@@ -455,6 +468,19 @@ describe('resolveAgentScopedSkillIds', () => {
           ephemeralSkillsToggle: false,
         }),
       ).toEqual([]);
+    });
+
+    it('still includes MCP stub skills when `skills_enabled` is false', () => {
+      const catalog = makeId();
+      const mcp = makeId();
+      const scoped = resolveAgentScopedSkillIds({
+        agent: persistedAgent([catalog.toString()], false),
+        accessibleSkillIds: [catalog, mcp],
+        skillsCapabilityEnabled: true,
+        ephemeralSkillsToggle: false,
+        mcpSkillIds: [mcp],
+      });
+      expect(scoped.map((o) => o.toString())).toEqual([mcp.toString()]);
     });
 
     it('returns full accessible catalog when `skills_enabled` is true and allowlist is undefined', () => {
@@ -494,6 +520,22 @@ describe('resolveAgentScopedSkillIds', () => {
       });
       expect(scoped).toHaveLength(2);
       expect(scoped.map((o) => o.toString()).sort()).toEqual([a.toString(), c.toString()].sort());
+    });
+
+    it('merges MCP stub skills into a persisted allowlist', () => {
+      const a = makeId();
+      const b = makeId();
+      const mcp = makeId();
+      const scoped = resolveAgentScopedSkillIds({
+        agent: persistedAgent([a.toString()], true),
+        accessibleSkillIds: [a, b, mcp],
+        skillsCapabilityEnabled: true,
+        ephemeralSkillsToggle: false,
+        mcpSkillIds: [mcp],
+      });
+      expect(scoped.map((o) => o.toString()).sort()).toEqual(
+        [a.toString(), mcp.toString()].sort(),
+      );
     });
 
     it('is unaffected by the ephemeral toggle — the persisted config is authoritative', () => {
@@ -682,6 +724,18 @@ describe('resolveSkillActive', () => {
     expect(
       resolveSkillActive({
         skill: deploymentSkill,
+        skillStates: {},
+        userId: undefined,
+        defaultActiveOnShare: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('defaults MCP stub skills to active without ownership or shared defaults', () => {
+    const mcpSkill = { ...makeSkill(new Types.ObjectId()), source: 'mcp' };
+    expect(
+      resolveSkillActive({
+        skill: mcpSkill,
         skillStates: {},
         userId: undefined,
         defaultActiveOnShare: false,

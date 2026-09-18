@@ -226,7 +226,7 @@ export interface ResolveAgentScopedSkillIdsParams {
   skillsCapabilityEnabled: boolean;
   /** Per-conversation skills badge toggle (`req.body.ephemeralAgent.skills`). */
   ephemeralSkillsToggle: boolean;
-  /** Auto-generated MCP stub skill IDs always shown in ephemeral chats. */
+  /** Auto-generated MCP stub skill IDs always merged into the chat catalog. */
   mcpSkillIds?: Types.ObjectId[];
 }
 
@@ -241,7 +241,11 @@ export interface ResolveAgentScopedSkillIdsParams {
  *    Enabled + empty allowlist = full catalog; enabled + non-empty
  *    allowlist = narrow to those ids; disabled (or undefined) = no skills.
  *
- * When not activated, returns `[]` so `injectSkillCatalog`,
+ * MCP stub skills are always merged when present (ephemeral and persisted),
+ * so `request_mcp` stays discoverable even when the author never opted into
+ * the curated skill catalog.
+ *
+ * When not activated (and no MCP stubs), returns `[]` so `injectSkillCatalog`,
  * `resolveManualSkills`, and `resolveAlwaysApplySkills` all no-op.
  *
  * Without this gate, an `agent.skills` of `undefined` on a persisted agent
@@ -307,17 +311,28 @@ export function resolveAgentScopedSkillIds(
     return uniqueSkillIds([...toggled, ...mcpIds]);
   }
   if (agent.skills_enabled !== true) {
-    return [];
+    return mcpIds;
   }
   if (!Array.isArray(agent.skills) || agent.skills.length === 0) {
-    return scopeSkillIds(accessibleSkillIds, undefined);
+    return uniqueSkillIds([
+      ...scopeSkillIds(accessibleSkillIds, undefined),
+      ...mcpIds,
+    ]);
   }
-  return scopeSkillIds(accessibleSkillIds, agent.skills);
+  return uniqueSkillIds([
+    ...scopeSkillIds(accessibleSkillIds, agent.skills),
+    ...mcpIds,
+  ]);
 }
 
 export interface ResolveSkillActiveParams {
-  /** Skill being evaluated. Only `_id` and `author` matter for resolution. */
-  skill: { _id: Types.ObjectId | string; author: Types.ObjectId | string; deployment?: boolean };
+  /** Skill being evaluated. Only `_id`, `author`, `deployment`, and `source` matter. */
+  skill: {
+    _id: Types.ObjectId | string;
+    author: Types.ObjectId | string;
+    deployment?: boolean;
+    source?: string;
+  };
   /** Per-user overrides: `{ [skillId]: boolean }`. Missing entries use the default. */
   skillStates?: Record<string, boolean>;
   /** Current user ID. When absent, the function fails closed for all non-overridden skills. */
@@ -333,8 +348,9 @@ export interface ResolveSkillActiveParams {
  * 1. Explicit override in `skillStates` wins above all.
  * 2. Absent `userId` → fail closed. The caller lost user context, so we do
  *    not fall back to ownership-based defaults that could leak shared skills.
- * 3. Owned skills (author === userId) default to **active**.
- * 4. Shared skills default to `defaultActiveOnShare` (admin-configured, default `false`).
+ * 3. Deployment skills and MCP stub skills (`source: 'mcp'`) default to **active**.
+ * 4. Owned skills (author === userId) default to **active**.
+ * 5. Shared skills default to `defaultActiveOnShare` (admin-configured, default `false`).
  */
 export function resolveSkillActive(params: ResolveSkillActiveParams): boolean {
   const { skill, skillStates, userId, defaultActiveOnShare = false } = params;
@@ -342,7 +358,7 @@ export function resolveSkillActive(params: ResolveSkillActiveParams): boolean {
   if (override !== undefined) {
     return override;
   }
-  if (skill.deployment === true) {
+  if (skill.deployment === true || skill.source === 'mcp') {
     return true;
   }
   if (!userId) {
@@ -832,7 +848,12 @@ export async function resolveManualSkills(
           return null;
         }
         const active = resolveSkillActive({
-          skill: { _id: skill._id, author: skill.author, deployment: skill.deployment },
+          skill: {
+            _id: skill._id,
+            author: skill.author,
+            deployment: skill.deployment,
+            source: skill.source,
+          },
           skillStates,
           userId,
           defaultActiveOnShare,
@@ -981,7 +1002,12 @@ export async function resolveAlwaysApplySkills(
         continue;
       }
       const active = resolveSkillActive({
-        skill: { _id: skill._id, author: skill.author, deployment: skill.deployment },
+        skill: {
+          _id: skill._id,
+          author: skill.author,
+          deployment: skill.deployment,
+          source: skill.source,
+        },
         skillStates,
         userId,
         defaultActiveOnShare,

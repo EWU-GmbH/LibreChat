@@ -11,7 +11,7 @@ export interface RequestMcpDefinition {
   description: string;
   schema: {
     type: 'object';
-    properties: Record<string, { type: 'string'; description: string }>;
+    properties: Record<string, { type: 'string'; description: string; enum?: string[] }>;
     required: string[];
   };
 }
@@ -36,6 +36,33 @@ export const RequestMcpToolDefinition: RequestMcpDefinition = {
   },
 };
 
+export function buildRequestMcpToolDefinition(availableServers: string[]): RequestMcpDefinition {
+  if (availableServers.length === 0) {
+    return RequestMcpToolDefinition;
+  }
+
+  const serverList = availableServers.join(', ');
+  return {
+    name: Tools.request_mcp,
+    description: `${RequestMcpToolDefinition.description} Available servers: ${serverList}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        serverName: {
+          type: 'string',
+          description: `Exact MCP server name. One of: ${serverList}.`,
+          enum: availableServers,
+        },
+        reason: {
+          type: 'string',
+          description: 'Short explanation shown to the user.',
+        },
+      },
+      required: ['serverName'],
+    },
+  };
+}
+
 export function resolveRequestableMcpServers(params: {
   mcpConfig: Record<string, ChatSelectableMcpConfig | undefined> | undefined;
   selectedServers?: string[];
@@ -54,6 +81,7 @@ export function createRequestMcpTool(params: {
   availableServers: string[];
 }): DynamicStructuredTool {
   const available = new Set(params.availableServers);
+  const definition = buildRequestMcpToolDefinition(params.availableServers);
   const [firstServer, ...otherServers] = params.availableServers;
   const serverNameSchema =
     firstServer != null
@@ -61,7 +89,7 @@ export function createRequestMcpTool(params: {
       : z.string().min(1);
   return new DynamicStructuredTool({
     name: Tools.request_mcp,
-    description: RequestMcpToolDefinition.description,
+    description: definition.description,
     schema: z.object({
       serverName: serverNameSchema,
       reason: z.string().optional(),

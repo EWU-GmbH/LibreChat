@@ -6,11 +6,12 @@
  */
 
 import { Providers } from '@librechat/agents';
-import { Constants, isActionTool } from 'librechat-data-provider';
+import { Tools, Constants, isActionTool } from 'librechat-data-provider';
 import type { LCToolRegistry, JsonSchemaType, LCTool, GenericTool } from '@librechat/agents';
 import type { AgentToolOptions } from 'librechat-data-provider';
 import type { ToolDefinition } from './classification';
 import { resolveJsonSchemaRefs, normalizeJsonSchema, sanitizeGeminiSchema } from '~/mcp/zod';
+import { buildRequestMcpToolDefinition } from './requestMcp';
 import { buildToolClassification } from './classification';
 import { getToolDefinition } from './registry/definitions';
 import { toolkitExpansion } from './toolkits/mapping';
@@ -42,6 +43,8 @@ export interface LoadToolDefinitionsParams {
   codeExecutionEnabled?: boolean;
   /** Agent provider — Gemini/Vertex tool schemas get union-flattened for compatibility */
   provider?: Providers;
+  /** Chat-selectable MCP servers the model may request via request_mcp */
+  requestableMcpServers?: string[];
 }
 
 export interface ActionToolDefinition {
@@ -87,6 +90,7 @@ export async function loadToolDefinitions(
     programmaticToolsEnabled = false,
     codeExecutionEnabled = false,
     provider,
+    requestableMcpServers,
   } = params;
   const { getOrFetchMCPServerTools, isBuiltInTool, getActionToolDefinitions } = deps;
 
@@ -127,6 +131,15 @@ export async function loadToolDefinitions(
 
     if (!mcpToolPattern.test(toolName)) {
       if (!isBuiltInTool(toolName)) {
+        continue;
+      }
+      if (toolName === Tools.request_mcp) {
+        const requestMcpDef = buildRequestMcpToolDefinition(requestableMcpServers ?? []);
+        builtInToolDefs.push({
+          name: toolName,
+          description: requestMcpDef.description,
+          parameters: requestMcpDef.schema as JsonSchemaType | undefined,
+        });
         continue;
       }
       const registryDef = getToolDefinition(toolName);

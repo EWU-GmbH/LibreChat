@@ -29,6 +29,7 @@ const {
   buildMCPAuthRunStepCompletedEvent,
   isFileAuthoringToolDefinition,
   canAccessMCPServer,
+  resolveRequestableMcpServers,
 } = require('@librechat/api');
 const {
   Time,
@@ -872,6 +873,11 @@ async function loadToolDefinitionsWrapper({ req, res, agent, streamId = null, to
       programmaticToolsEnabled,
       codeExecutionEnabled,
       provider: agent.provider,
+      requestableMcpServers: resolveRequestableMcpServers({
+        mcpConfig: req.config?.mcpConfig,
+        selectedServers: req.body?.ephemeralAgent?.mcp,
+        user: req.user,
+      }),
     },
     {
       isBuiltInTool,
@@ -954,6 +960,11 @@ async function loadToolDefinitionsWrapper({ req, res, agent, streamId = null, to
           programmaticToolsEnabled,
           codeExecutionEnabled,
           provider: agent.provider,
+          requestableMcpServers: resolveRequestableMcpServers({
+            mcpConfig: req.config?.mcpConfig,
+            selectedServers: req.body?.ephemeralAgent?.mcp,
+            user: req.user,
+          }),
         },
         {
           isBuiltInTool,

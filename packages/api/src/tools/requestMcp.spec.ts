@@ -1,5 +1,9 @@
 import { Tools } from 'librechat-data-provider';
-import { createRequestMcpTool, resolveRequestableMcpServers } from './requestMcp';
+import {
+  buildRequestMcpToolDefinition,
+  createRequestMcpTool,
+  resolveRequestableMcpServers,
+} from './requestMcp';
 
 describe('request_mcp', () => {
   it('omits selected and inaccessible servers', () => {
@@ -13,6 +17,18 @@ describe('request_mcp', () => {
       user: { id: 'u1', mcpAccess: { policy: 'allowlist', servers: ['formbricks', 'dataforseo'] } },
     });
     expect(servers).toEqual(['formbricks']);
+  });
+
+  it('enriches the tool definition with available server names', () => {
+    const definition = buildRequestMcpToolDefinition(['dokumente', 'formbricks']);
+    expect(definition.description).toContain('dokumente');
+    expect(definition.description).toContain('formbricks');
+    expect(definition.schema.properties.serverName.enum).toEqual(['dokumente', 'formbricks']);
+  });
+
+  it('keeps the static definition when no servers are requestable', () => {
+    const definition = buildRequestMcpToolDefinition([]);
+    expect(definition.schema.properties.serverName.enum).toBeUndefined();
   });
 
   it('rejects unknown server names', async () => {

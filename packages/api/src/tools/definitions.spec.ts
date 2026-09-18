@@ -827,5 +827,33 @@ describe('definitions.ts', () => {
         expect(registryEntry?.allowed_callers).toContain('direct');
       });
     });
+
+    describe('request_mcp definitions', () => {
+      it('enriches request_mcp with requestable MCP server names', async () => {
+        mockIsBuiltInTool.mockImplementation((toolName: string) => toolName === 'request_mcp');
+
+        const params: LoadToolDefinitionsParams = {
+          userId: 'user-123',
+          agentId: 'agent-123',
+          tools: ['request_mcp'],
+          requestableMcpServers: ['dokumente', 'formbricks'],
+        };
+
+        const deps: LoadToolDefinitionsDeps = {
+          getOrFetchMCPServerTools: mockGetOrFetchMCPServerTools,
+          isBuiltInTool: mockIsBuiltInTool,
+        };
+
+        const result = await loadToolDefinitions(params, deps);
+        const requestMcp = result.toolDefinitions.find((d) => d.name === 'request_mcp');
+
+        expect(requestMcp).toBeDefined();
+        expect(requestMcp?.description).toContain('dokumente');
+        expect(
+          (requestMcp?.parameters as { properties?: { serverName?: { enum?: string[] } } })
+            ?.properties?.serverName?.enum,
+        ).toEqual(['dokumente', 'formbricks']);
+      });
+    });
   });
 });
