@@ -25,7 +25,7 @@ const {
 } = require('@librechat/api');
 const { processFileCitations } = require('~/server/services/Files/Citations');
 const { processCodeOutput, runPreviewFinalize } = require('~/server/services/Files/Code/process');
-const { saveBase64Image } = require('~/server/services/Files/process');
+const { saveBase64Image, saveBase64File } = require('~/server/services/Files/process');
 
 function isHostFileAuthoringArtifact(artifact) {
   return artifact?.[HOST_FILE_AUTHORING_ARTIFACT_KEY] === true;
@@ -33,6 +33,52 @@ function isHostFileAuthoringArtifact(artifact) {
 
 function isCodeArtifactToolOutput(output) {
   return isCodeSessionToolName(output.name) || isHostFileAuthoringArtifact(output.artifact);
+}
+
+/**
+ * Persist MCP binary artifacts (e.g. ElevenLabs TTS) as downloadable chat attachments.
+ * @param {Object} params
+ * @param {ServerRequest} params.req
+ * @param {Object} params.output
+ * @param {Object} params.metadata
+ * @param {Promise[]} params.artifactPromises
+ * @param {(fileMetadata: Object) => void} params.emitAttachment
+ */
+function enqueueMcpFileArtifacts({ req, output, metadata, artifactPromises, emitAttachment }) {
+  const mcpFiles = output.artifact?.mcp_files;
+  if (!Array.isArray(mcpFiles) || mcpFiles.length === 0) {
+    return;
+  }
+
+  for (const mcpFile of mcpFiles) {
+    if (!mcpFile?.data || !mcpFile?.filename) {
+      continue;
+    }
+    artifactPromises.push(
+      (async () => {
+        const file = await saveBase64File({
+          req,
+          data: mcpFile.data,
+          filename: mcpFile.filename,
+          mimeType: mcpFile.mimeType || 'application/octet-stream',
+          context: FileContext.message_attachment,
+        });
+        const fileMetadata = Object.assign(file, {
+          messageId: metadata.run_id,
+          toolCallId: output.tool_call_id,
+          conversationId: metadata.thread_id,
+        });
+        if (!fileMetadata) {
+          return null;
+        }
+        emitAttachment(fileMetadata);
+        return fileMetadata;
+      })().catch((error) => {
+        logger.error('Error processing MCP file artifact:', error);
+        return null;
+      }),
+    );
+  }
 }
 
 class ModelEndHandler {
@@ -763,6 +809,22 @@ function createToolEndCallback({ req, res, artifactPromises, streamId = null }) 
       );
     }
 
+    enqueueMcpFileArtifacts({
+      req,
+      output,
+      metadata,
+      artifactPromises,
+      emitAttachment: (fileMetadata) => {
+        if (!streamId && !res.headersSent) {
+          return;
+        }
+        if (!isStreamWritable(res, streamId)) {
+          return;
+        }
+        writeAttachment(res, streamId, fileMetadata);
+      },
+    });
+
     if (output.artifact.content) {
       /** @type {FormattedContent[]} */
       const content = output.artifact.content;
@@ -1021,6 +1083,30 @@ function createResponsesToolEndCallback({ req, res, tracker, artifactPromises })
         }),
       );
     }
+
+    enqueueMcpFileArtifacts({
+      req,
+      output,
+      metadata,
+      artifactPromises,
+      emitAttachment: (fileMetadata) => {
+        if (!res.headersSent || res.writableEnded) {
+          return;
+        }
+        writeResponsesAttachment(
+          res,
+          tracker,
+          {
+            file_id: fileMetadata.file_id,
+            filename: fileMetadata.filename,
+            type: fileMetadata.type,
+            url: fileMetadata.filepath,
+            tool_call_id: output.tool_call_id,
+          },
+          metadata,
+        );
+      },
+    });
 
     if (output.artifact.content) {
       /** @type {FormattedContent[]} */

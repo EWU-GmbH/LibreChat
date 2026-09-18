@@ -123,6 +123,14 @@ export type FileSearchSource = {
   [key: string]: unknown;
 };
 
+/** Binary MCP resource (e.g. ElevenLabs TTS) queued for chat attachment download. */
+export type McpFileArtifact = {
+  filename: string;
+  mimeType: string;
+  /** Raw base64 payload (no `data:` prefix). */
+  data: string;
+};
+
 export type Artifacts =
   | {
       content?: FormattedContent[];
@@ -134,6 +142,8 @@ export type Artifacts =
         fileCitations?: boolean;
       };
       [Tools.web_search]?: SearchResultData;
+      /** MCP blob/audio resources persisted as downloadable chat attachments. */
+      mcp_files?: McpFileArtifact[];
       files?: Array<{ id: string; name: string }>;
       session_id?: string;
       file_ids?: string[];

@@ -303,6 +303,50 @@ describe('formatToolContent', () => {
       expect(artifacts).toBeUndefined();
     });
 
+    it('should extract binary blob resources as mcp_files attachments', () => {
+      const result: t.MCPToolCallResponse = {
+        content: [
+          {
+            type: 'resource',
+            resource: {
+              uri: 'elevenlabs:///home/node/Desktop/tts_hello_20260918.mp3',
+              mimeType: 'audio/mpeg',
+              blob: 'SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAADhAC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAA4Sp2YksAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAD/4xD/AAAAlgAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV',
+            },
+          },
+        ],
+      };
+
+      const [content, artifacts] = formatToolContent(result, 'openai');
+      expect(content).toContain('File attachment available for download: tts_hello_20260918.mp3');
+      expect(content).toContain('Resource URI: elevenlabs:///home/node/Desktop/tts_hello_20260918.mp3');
+      expect(content).not.toContain('blob');
+      expect(artifacts?.mcp_files).toHaveLength(1);
+      expect(artifacts?.mcp_files?.[0]).toMatchObject({
+        filename: 'tts_hello_20260918.mp3',
+        mimeType: 'audio/mpeg',
+      });
+      expect(artifacts?.mcp_files?.[0]?.data?.length).toBeGreaterThan(10);
+    });
+
+    it('should extract audio content as mcp_files attachments', () => {
+      const result: t.MCPToolCallResponse = {
+        content: [
+          {
+            type: 'audio',
+            data: 'SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA',
+            mimeType: 'audio/mpeg',
+          } as t.ToolContentPart,
+        ],
+      };
+
+      const [content, artifacts] = formatToolContent(result, 'openai');
+      expect(content).toContain('File attachment available for download:');
+      expect(content).toContain('audio/mpeg');
+      expect(artifacts?.mcp_files).toHaveLength(1);
+      expect(artifacts?.mcp_files?.[0]?.mimeType).toBe('audio/mpeg');
+    });
+
     it('should handle resources with partial data', () => {
       const result: t.MCPToolCallResponse = {
         content: [

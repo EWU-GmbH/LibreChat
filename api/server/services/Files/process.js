@@ -1249,6 +1249,70 @@ async function saveBase64Image(
 }
 
 /**
+ * Persists a base64-encoded binary file (e.g. MCP audio) as a downloadable chat attachment.
+ * @param {Object} params
+ * @param {ServerRequest} params.req
+ * @param {string} params.data - Raw base64 (no data-URL prefix) or a data URL
+ * @param {string} params.filename
+ * @param {string} params.mimeType
+ * @param {string} [params.file_id]
+ * @param {string} [params.context]
+ */
+async function saveBase64File({
+  req,
+  data,
+  filename: inputFilename,
+  mimeType,
+  file_id: _file_id,
+  context = FileContext.message_attachment,
+}) {
+  const appConfig = req.config;
+  const file_id = _file_id ?? v4();
+  const dataUrl =
+    typeof data === 'string' && data.startsWith('data:')
+      ? data
+      : `data:${mimeType || 'application/octet-stream'};base64,${data}`;
+  const { buffer, type: detectedType } = base64ToBuffer(dataUrl);
+  const type = mimeType || detectedType || 'application/octet-stream';
+
+  let filename = path.basename(inputFilename || 'mcp_file');
+  if (!path.extname(filename)) {
+    const extension = mime.getExtension(type);
+    if (extension) {
+      filename = `${filename}.${extension}`;
+    }
+  }
+  const storageFilename = `${file_id}-${sanitizeFilename(filename)}`;
+
+  const source = getFileStrategy(appConfig, { isImage: false });
+  const { saveBuffer } = getStrategyFunctions(source);
+  const filepath = await saveBuffer({
+    userId: req.user.id,
+    fileName: storageFilename,
+    buffer,
+    basePath: 'uploads',
+    tenantId: req.user.tenantId,
+  });
+  const storageMetadata = getStorageMetadata({ filepath, source });
+  return await db.createFile(
+    {
+      type,
+      source,
+      context,
+      file_id,
+      filepath,
+      ...storageMetadata,
+      filename,
+      user: req.user.id,
+      bytes: buffer.length,
+      ...(await getRetentionExpiry(req)),
+      tenantId: req.user.tenantId,
+    },
+    true,
+  );
+}
+
+/**
  * Filters a file based on its size and the endpoint origin.
  *
  * @param {Object} params - The parameters for the function.
@@ -1330,6 +1394,7 @@ module.exports = {
   filterFile,
   processFileURL,
   saveBase64Image,
+  saveBase64File,
   processImageFile,
   uploadImageBuffer,
   sweepExpiredFiles,
