@@ -93,6 +93,24 @@ describe('admin user management handlers', () => {
     );
   });
 
+  it('serializes string createdAt/lastLoginAt from lean documents', async () => {
+    const leanUser = user({
+      createdAt: '2024-06-15T12:00:00.000Z' as unknown as Date,
+      lastLoginAt: '2025-01-02T08:30:00.000Z' as unknown as Date,
+    });
+    const deps = dependencies({ findUsers: jest.fn().mockResolvedValue([leanUser]) });
+    const handlers = createAdminUserManagementHandlers(deps);
+    const { res, status, json } = response();
+
+    await handlers.listUsers(request(), res);
+
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json.mock.calls[0][0].users[0]).toMatchObject({
+      createdAt: '2024-06-15T12:00:00.000Z',
+      lastLoginAt: '2025-01-02T08:30:00.000Z',
+    });
+  });
+
   it('returns a clear error when SMTP is unavailable', async () => {
     const deps = dependencies({ checkEmailConfig: jest.fn().mockReturnValue(false) });
     const handlers = createAdminUserManagementHandlers(deps);

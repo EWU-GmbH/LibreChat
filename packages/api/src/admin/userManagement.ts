@@ -17,8 +17,9 @@ import type {
 import type { FilterQuery } from 'mongoose';
 import type { Response } from 'express';
 import type { ServerRequest } from '~/types/http';
-import { buildAuditContext } from './context';
 import { createInvite } from '~/auth/invite';
+import { buildAuditContext } from './context';
+import { toIsoString } from './dates';
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
@@ -130,8 +131,8 @@ function mapUser(user: IUser): AdminUser {
     role: user.role ?? SystemRoles.USER,
     provider: user.provider,
     blocked: user.blocked === true,
-    lastLoginAt: user.lastLoginAt?.toISOString(),
-    createdAt: user.createdAt?.toISOString(),
+    lastLoginAt: toIsoString(user.lastLoginAt),
+    createdAt: toIsoString(user.createdAt),
     mcpAccess: normalizeMCPAccess(user.mcpAccess),
   };
 }
