@@ -10,9 +10,13 @@ const mockUseAdminMCPServersQuery = jest.fn();
 jest.mock('~/data-provider', () => ({
   useAdminUsersQuery: (...args: never[]) => mockUseAdminUsersQuery(...args),
   useAdminMCPServersQuery: (...args: never[]) => mockUseAdminMCPServersQuery(...args),
+  useAdminPendingInvitesQuery: () => ({ data: { invites: [] }, isLoading: false }),
   useInviteAdminUserMutation: () => ({ mutate: jest.fn(), isLoading: false }),
+  useRevokeAdminUserInviteMutation: () => ({ mutate: jest.fn(), isLoading: false }),
   useUpdateAdminUserStatusMutation: () => ({ mutate: jest.fn(), isLoading: false }),
   useUpdateAdminUserMCPAccessMutation: () => ({ mutate: jest.fn(), isLoading: false }),
+  useResendAdminUserAccessMutation: () => ({ mutate: jest.fn(), isLoading: false }),
+  useDeleteAdminUserMutation: () => ({ mutate: jest.fn(), isLoading: false }),
 }));
 
 const mockAuth = {

@@ -42,6 +42,16 @@ export type AdminInviteUserResponse = {
   expiresAt: string;
 };
 
+export type AdminPendingInvite = {
+  email: string;
+  expiresAt: string;
+  createdAt?: string;
+};
+
+export type AdminPendingInvitesResponse = {
+  invites: AdminPendingInvite[];
+};
+
 export type AdminMCPServersResponse = {
   servers: string[];
 };
@@ -52,4 +62,13 @@ export type AdminUpdateUserStatusRequest = {
 
 export type AdminUpdateMCPAccessRequest = {
   mcpAccess: UserMCPAccess;
+};
+
+export type AdminResendAccessResponse = {
+  success: boolean;
+  email: string;
+};
+
+export type AdminDeleteUserResponse = {
+  message: string;
 };

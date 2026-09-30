@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { dataService, QueryKeys } from 'librechat-data-provider';
 import type {
   AdminMCPServersResponse,
+  AdminPendingInvitesResponse,
   AdminUsersPage,
   AdminUsersParams,
 } from 'librechat-data-provider';
@@ -24,6 +25,15 @@ export function useAdminMCPServersQuery(
   return useQuery([QueryKeys.adminMCPServers], () => dataService.getAdminMCPServers(), {
     enabled,
     staleTime: 60_000,
+    retry: false,
+  });
+}
+
+export function useAdminPendingInvitesQuery(
+  enabled = true,
+): QueryObserverResult<AdminPendingInvitesResponse> {
+  return useQuery([QueryKeys.adminPendingInvites], () => dataService.getAdminPendingInvites(), {
+    enabled,
     retry: false,
   });
 }

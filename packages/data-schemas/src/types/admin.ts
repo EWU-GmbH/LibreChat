@@ -98,6 +98,8 @@ export const AUDIT_ACTIONS = [
   'auth.invite_revoked',
   'auth.user_blocked',
   'auth.user_unblocked',
+  'auth.password_reset_sent',
+  'auth.user_deleted',
   'mcp.user_access_updated',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -110,6 +112,8 @@ export const AUDIT_ACTION_CATEGORY: Record<AuditAction, AuditCategory> = {
   'auth.invite_revoked': 'auth',
   'auth.user_blocked': 'auth',
   'auth.user_unblocked': 'auth',
+  'auth.password_reset_sent': 'auth',
+  'auth.user_deleted': 'auth',
   'mcp.user_access_updated': 'mcp',
 };
 
