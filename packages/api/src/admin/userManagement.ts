@@ -52,6 +52,12 @@ interface EmailOptions {
   template: 'inviteUser.handlebars';
 }
 
+export type PendingInvite = {
+  email: string;
+  expiresAt: string;
+  createdAt?: string;
+};
+
 export interface AdminUserManagementDeps {
   findUsers: (
     searchCriteria: FilterQuery<IUser>,
@@ -65,7 +71,10 @@ export interface AdminUserManagementDeps {
   deleteTokens: (query: {
     email?: string | null;
     type?: string | null;
+    userId?: string | Types.ObjectId | null;
   }) => Promise<TokenDeleteResult>;
+  findPendingInvites: () => Promise<PendingInvite[]>;
+  sendPasswordReset: (user: IUser, req: ServerRequest) => Promise<void>;
   sendEmail: (options: EmailOptions) => Promise<void>;
   checkEmailConfig: () => boolean;
   resolveMCPServerNames: (req: ServerRequest) => Promise<string[]>;
@@ -157,8 +166,10 @@ function resolveCaller(req: ServerRequest): {
 export function createAdminUserManagementHandlers(deps: AdminUserManagementDeps): {
   listUsers: (req: ServerRequest, res: Response) => Promise<Response>;
   listMCPServers: (req: ServerRequest, res: Response) => Promise<Response>;
+  listInvites: (req: ServerRequest, res: Response) => Promise<Response>;
   inviteUser: (req: ServerRequest, res: Response) => Promise<Response>;
   revokeInvite: (req: ServerRequest, res: Response) => Promise<Response>;
+  resendAccess: (req: ServerRequest, res: Response) => Promise<Response>;
   updateStatus: (req: ServerRequest, res: Response) => Promise<Response>;
   updateMCPAccess: (req: ServerRequest, res: Response) => Promise<Response>;
 } {
@@ -238,6 +249,16 @@ export function createAdminUserManagementHandlers(deps: AdminUserManagementDeps)
     } catch (error) {
       logger.error('[adminUserManagement] list MCP servers failed', error);
       return res.status(500).json({ error: 'Failed to list MCP servers' });
+    }
+  }
+
+  async function listInvites(_req: ServerRequest, res: Response): Promise<Response> {
+    try {
+      const invites = await deps.findPendingInvites();
+      return res.status(200).json({ invites });
+    } catch (error) {
+      logger.error('[adminUserManagement] list invites failed', error);
+      return res.status(500).json({ error: 'Failed to list invitations' });
     }
   }
 
@@ -325,6 +346,35 @@ export function createAdminUserManagementHandlers(deps: AdminUserManagementDeps)
     } catch (error) {
       logger.error('[adminUserManagement] revoke invitation failed', error);
       return res.status(500).json({ error: 'Failed to revoke invitation' });
+    }
+  }
+
+  async function resendAccess(req: ServerRequest, res: Response): Promise<Response> {
+    const { id } = req.params as { id: string };
+    if (!isValidObjectIdString(id)) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+    if (!deps.checkEmailConfig()) {
+      return res.status(503).json({ error: 'SMTP is not configured' });
+    }
+
+    try {
+      const [target] = await deps.findUsers({ _id: id }, USER_FIELDS, { limit: 1 });
+      if (!target) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      if (target.provider && target.provider !== 'local') {
+        return res.status(400).json({
+          error: 'Password reset emails are only available for local accounts',
+        });
+      }
+
+      await deps.sendPasswordReset(target, req);
+      await audit(req, 'auth.password_reset_sent', { id, name: target.email });
+      return res.status(200).json({ success: true, email: target.email });
+    } catch (error) {
+      logger.error('[adminUserManagement] resend access failed', error);
+      return res.status(500).json({ error: 'Failed to send access email' });
     }
   }
 
@@ -417,8 +467,10 @@ export function createAdminUserManagementHandlers(deps: AdminUserManagementDeps)
   return {
     listUsers,
     listMCPServers,
+    listInvites,
     inviteUser,
     revokeInvite,
+    resendAccess,
     updateStatus,
     updateMCPAccess,
   };

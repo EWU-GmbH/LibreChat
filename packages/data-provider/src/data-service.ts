@@ -1,8 +1,11 @@
 import type { AxiosResponse } from 'axios';
 import type {
+  AdminDeleteUserResponse,
   AdminInviteUserRequest,
   AdminInviteUserResponse,
   AdminMCPServersResponse,
+  AdminPendingInvitesResponse,
+  AdminResendAccessResponse,
   AdminUpdateMCPAccessRequest,
   AdminUpdateUserStatusRequest,
   AdminUser,
@@ -45,6 +48,10 @@ export function getAdminMCPServers(): Promise<AdminMCPServersResponse> {
   return request.get(endpoints.adminUserMCPServers());
 }
 
+export function getAdminPendingInvites(): Promise<AdminPendingInvitesResponse> {
+  return request.get(endpoints.adminUserInvites());
+}
+
 export function inviteAdminUser(payload: AdminInviteUserRequest): Promise<AdminInviteUserResponse> {
   return request.post(endpoints.adminUserInvites(), payload);
 }
@@ -65,6 +72,14 @@ export function updateAdminUserMCPAccess(
   payload: AdminUpdateMCPAccessRequest,
 ): Promise<{ user: AdminUser }> {
   return request.put(endpoints.adminUserMCPAccess(userId), payload);
+}
+
+export function resendAdminUserAccess(userId: string): Promise<AdminResendAccessResponse> {
+  return request.post(endpoints.adminUserResendAccess(userId), {});
+}
+
+export function deleteAdminUser(userId: string): Promise<AdminDeleteUserResponse> {
+  return request.delete(endpoints.adminUser(userId));
 }
 
 export function revokeUserKey(name: string): Promise<unknown> {

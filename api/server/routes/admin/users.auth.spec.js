@@ -5,12 +5,15 @@ jest.mock('@librechat/api', () => ({
   checkEmailConfig: jest.fn(() => true),
   createAdminUsersHandlers: jest.fn(() => ({
     searchUsers: (_req, res) => res.status(200).json({ users: [] }),
+    deleteUser: (_req, res) => res.status(200).json({ message: 'deleted' }),
   })),
   createAdminUserManagementHandlers: jest.fn(() => ({
     listUsers: (_req, res) => res.status(200).json({ users: [] }),
     listMCPServers: (_req, res) => res.status(200).json({ servers: [] }),
+    listInvites: (_req, res) => res.status(200).json({ invites: [] }),
     inviteUser: (_req, res) => res.status(201).json({}),
     revokeInvite: (_req, res) => res.status(200).json({}),
+    resendAccess: (_req, res) => res.status(200).json({ success: true }),
     updateStatus: (_req, res) => res.status(200).json({}),
     updateMCPAccess: (_req, res) => res.status(200).json({}),
   })),
@@ -38,6 +41,10 @@ jest.mock('~/server/middleware/roles/capabilities', () => ({
 
 jest.mock('~/server/services/MCP', () => ({
   resolveMcpConfigNames: jest.fn().mockResolvedValue([]),
+}));
+
+jest.mock('~/server/services/AuthService', () => ({
+  requestPasswordReset: jest.fn(),
 }));
 
 jest.mock('~/server/utils', () => ({

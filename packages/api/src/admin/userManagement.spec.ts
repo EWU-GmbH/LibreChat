@@ -59,6 +59,8 @@ function dependencies(overrides: Partial<AdminUserManagementDeps> = {}): AdminUs
     deleteAllUserSessions: jest.fn().mockResolvedValue({ deletedCount: 1 }),
     createToken: jest.fn().mockResolvedValue({}),
     deleteTokens: jest.fn().mockResolvedValue({ deletedCount: 1 }),
+    findPendingInvites: jest.fn().mockResolvedValue([]),
+    sendPasswordReset: jest.fn().mockResolvedValue(undefined),
     sendEmail: jest.fn().mockResolvedValue(undefined),
     checkEmailConfig: jest.fn().mockReturnValue(true),
     resolveMCPServerNames: jest.fn().mockResolvedValue(['dataforseo', 'formbricks', 'listmonk']),
@@ -259,5 +261,56 @@ describe('admin user management handlers', () => {
     expect(deps.updateUser).toHaveBeenCalledWith(target._id.toString(), {
       mcpAccess: { policy: 'allowlist', servers: ['dataforseo'] },
     });
+  });
+
+  it('lists pending invitations', async () => {
+    const invites = [
+      {
+        email: 'pending@example.com',
+        expiresAt: '2026-10-07T00:00:00.000Z',
+        createdAt: '2026-09-30T00:00:00.000Z',
+      },
+    ];
+    const deps = dependencies({ findPendingInvites: jest.fn().mockResolvedValue(invites) });
+    const handlers = createAdminUserManagementHandlers(deps);
+    const { res, status, json } = response();
+
+    await handlers.listInvites(request(), res);
+
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith({ invites });
+  });
+
+  it('sends a password-reset access email for local users', async () => {
+    const target = user({ provider: 'local', email: 'local@example.com' });
+    const sendPasswordReset = jest.fn().mockResolvedValue(undefined);
+    const deps = dependencies({
+      findUsers: jest.fn().mockResolvedValue([target]),
+      sendPasswordReset,
+    });
+    const handlers = createAdminUserManagementHandlers(deps);
+    const { res, status, json } = response();
+    const req = request({ params: { id: target._id.toString() } });
+
+    await handlers.resendAccess(req, res);
+
+    expect(sendPasswordReset).toHaveBeenCalledWith(target, req);
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith({ success: true, email: 'local@example.com' });
+  });
+
+  it('rejects access emails for non-local providers', async () => {
+    const target = user({ provider: 'openid' });
+    const deps = dependencies({ findUsers: jest.fn().mockResolvedValue([target]) });
+    const handlers = createAdminUserManagementHandlers(deps);
+    const { res, status, json } = response();
+
+    await handlers.resendAccess(request({ params: { id: target._id.toString() } }), res);
+
+    expect(status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith({
+      error: 'Password reset emails are only available for local accounts',
+    });
+    expect(deps.sendPasswordReset).not.toHaveBeenCalled();
   });
 });

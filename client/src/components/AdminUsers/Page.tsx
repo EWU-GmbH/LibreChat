@@ -3,12 +3,16 @@ import { Link, Navigate } from 'react-router-dom';
 import { SystemRoles } from 'librechat-data-provider';
 import { Button, Input, Spinner, useToastContext } from '@librechat/client';
 import { ChevronLeft, ChevronRight, Search, ShieldCheck, UserPlus, X } from 'lucide-react';
-import type { AdminUser, UserMCPAccess } from 'librechat-data-provider';
+import type { AdminPendingInvite, AdminUser, UserMCPAccess } from 'librechat-data-provider';
 import type { ReactNode } from 'react';
 import {
   useAdminMCPServersQuery,
+  useAdminPendingInvitesQuery,
   useAdminUsersQuery,
+  useDeleteAdminUserMutation,
   useInviteAdminUserMutation,
+  useResendAdminUserAccessMutation,
+  useRevokeAdminUserInviteMutation,
   useUpdateAdminUserMCPAccessMutation,
   useUpdateAdminUserStatusMutation,
 } from '~/data-provider';
@@ -149,10 +153,15 @@ export default function AdminUsersPage() {
     isAdmin,
   );
   const serversQuery = useAdminMCPServersQuery(isAdmin);
+  const invitesQuery = useAdminPendingInvitesQuery(isAdmin);
   const inviteMutation = useInviteAdminUserMutation();
+  const revokeInviteMutation = useRevokeAdminUserInviteMutation();
   const statusMutation = useUpdateAdminUserStatusMutation();
   const accessMutation = useUpdateAdminUserMCPAccessMutation();
+  const resendAccessMutation = useResendAdminUserAccessMutation();
+  const deleteMutation = useDeleteAdminUserMutation();
   const servers = useMemo(() => serversQuery.data?.servers ?? [], [serversQuery.data?.servers]);
+  const pendingInvites = invitesQuery.data?.invites ?? [];
 
   if (!isAdmin) {
     return <Navigate to="/c/new" replace={true} />;
@@ -178,6 +187,30 @@ export default function AdminUsersPage() {
     );
   };
 
+  const resendPendingInvite = (invite: AdminPendingInvite) => {
+    inviteMutation.mutate(
+      { email: invite.email, expiresInDays: expiryDays, mcpAccess: { policy: 'all', servers: [] } },
+      {
+        onSuccess: () =>
+          showToast({ status: 'success', message: localize('com_admin_users_invite_success') }),
+        onError: () =>
+          showToast({ status: 'error', message: localize('com_admin_users_invite_error') }),
+      },
+    );
+  };
+
+  const revokePendingInvite = (email: string) => {
+    revokeInviteMutation.mutate(email, {
+      onSuccess: () =>
+        showToast({
+          status: 'success',
+          message: localize('com_admin_users_revoke_invite_success'),
+        }),
+      onError: () =>
+        showToast({ status: 'error', message: localize('com_admin_users_revoke_invite_error') }),
+    });
+  };
+
   const toggleStatus = (target: AdminUser) => {
     statusMutation.mutate(
       { userId: target.id, payload: { blocked: !target.blocked } },
@@ -188,6 +221,33 @@ export default function AdminUsersPage() {
           showToast({ status: 'error', message: localize('com_admin_users_status_error') }),
       },
     );
+  };
+
+  const resendAccess = (target: AdminUser) => {
+    resendAccessMutation.mutate(target.id, {
+      onSuccess: () =>
+        showToast({
+          status: 'success',
+          message: localize('com_admin_users_resend_access_success'),
+        }),
+      onError: () =>
+        showToast({ status: 'error', message: localize('com_admin_users_resend_access_error') }),
+    });
+  };
+
+  const deleteUser = (target: AdminUser) => {
+    const confirmed = window.confirm(
+      localize('com_admin_users_delete_confirm', { email: target.email }),
+    );
+    if (!confirmed) {
+      return;
+    }
+    deleteMutation.mutate(target.id, {
+      onSuccess: () =>
+        showToast({ status: 'success', message: localize('com_admin_users_delete_success') }),
+      onError: () =>
+        showToast({ status: 'error', message: localize('com_admin_users_delete_error') }),
+    });
   };
 
   const saveAccess = () => {
@@ -235,6 +295,63 @@ export default function AdminUsersPage() {
           </Button>
         </div>
 
+        <section className="mb-6 overflow-hidden rounded-xl border border-border-light bg-surface-primary">
+          <div className="border-b border-border-light px-4 py-3">
+            <h2 className="text-sm font-semibold text-text-primary">
+              {localize('com_admin_users_pending_invites')}
+            </h2>
+          </div>
+          {invitesQuery.isLoading && (
+            <div className="flex items-center gap-2 px-4 py-6 text-sm text-text-secondary">
+              <Spinner className="h-4 w-4" />
+              {localize('com_admin_users_loading')}
+            </div>
+          )}
+          {!invitesQuery.isLoading && pendingInvites.length === 0 && (
+            <p className="px-4 py-6 text-sm text-text-secondary">
+              {localize('com_admin_users_pending_empty')}
+            </p>
+          )}
+          {!invitesQuery.isLoading && pendingInvites.length > 0 && (
+            <ul className="divide-y divide-border-light">
+              {pendingInvites.map((invite) => (
+                <li
+                  key={invite.email}
+                  className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div>
+                    <div className="font-medium text-text-primary">{invite.email}</div>
+                    <div className="text-xs text-text-secondary">
+                      {localize('com_admin_users_pending_expires')}:{' '}
+                      {formatDate(invite.expiresAt, localize('com_admin_users_never'))}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={inviteMutation.isLoading}
+                      onClick={() => resendPendingInvite(invite)}
+                    >
+                      {localize('com_admin_users_resend_invite')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={revokeInviteMutation.isLoading}
+                      onClick={() => revokePendingInvite(invite.email)}
+                    >
+                      {localize('com_admin_users_revoke_invite')}
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-border-light bg-surface-primary px-3">
           <Search className="h-4 w-4 text-text-secondary" aria-hidden="true" />
           <Input
@@ -271,7 +388,7 @@ export default function AdminUsersPage() {
             usersQuery.data != null &&
             usersQuery.data.users.length > 0 && (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+                <table className="w-full min-w-[980px] border-collapse text-left text-sm">
                   <thead className="bg-surface-secondary text-text-secondary">
                     <tr>
                       <th scope="col" className="px-4 py-3 font-medium">
@@ -326,7 +443,7 @@ export default function AdminUsersPage() {
                             : `${target.mcpAccess.servers.length} / ${servers.length}`}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap gap-2">
                             <Button
                               type="button"
                               variant="outline"
@@ -344,6 +461,19 @@ export default function AdminUsersPage() {
                               type="button"
                               variant="outline"
                               size="sm"
+                              disabled={
+                                resendAccessMutation.isLoading ||
+                                target.provider !== 'local' ||
+                                target.id === user?.id
+                              }
+                              onClick={() => resendAccess(target)}
+                            >
+                              {localize('com_admin_users_resend_access')}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
                               disabled={target.role === SystemRoles.ADMIN}
                               onClick={() => {
                                 setAccessUser(target);
@@ -351,6 +481,15 @@ export default function AdminUsersPage() {
                               }}
                             >
                               {localize('com_admin_users_mcp_access')}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={deleteMutation.isLoading || target.id === user?.id}
+                              onClick={() => deleteUser(target)}
+                            >
+                              {localize('com_admin_users_delete')}
                             </Button>
                           </div>
                         </td>
