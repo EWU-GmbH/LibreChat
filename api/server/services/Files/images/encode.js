@@ -10,6 +10,7 @@ const {
   mergeFileConfig,
   getEndpointFileConfig,
 } = require('librechat-data-provider');
+const { isMissingStorageError } = require('~/server/services/Files/storageError');
 const { getStrategyFunctions } = require('~/server/services/Files/strategies');
 
 /**
@@ -88,6 +89,28 @@ const blobStorageSources = new Set([
 ]);
 
 /**
+ * Loads one image payload. Missing storage objects are omitted so a wiped
+ * local file cannot abort the rest of the generation.
+ * @param {Function} preparePayload
+ * @param {ServerRequest} req
+ * @param {MongoFile} file
+ * @returns {Promise<[MongoFile, string] | null>}
+ */
+function loadImagePayload(preparePayload, req, file) {
+  return Promise.resolve()
+    .then(() => preparePayload(req, file))
+    .catch((error) => {
+      if (!isMissingStorageError(error)) {
+        throw error;
+      }
+      logger.warn(
+        `[encodeAndFormat] Skipping image missing from storage (file_id: ${file.file_id})`,
+      );
+      return null;
+    });
+}
+
+/**
  * Encodes and formats the given files.
  * @param {ServerRequest} req - The request object.
  * @param {Array<MongoFile>} files - The array of files to encode and format.
@@ -150,12 +173,12 @@ async function encodeAndFormat(req, files, params, mode) {
       promises.push([_file, await fetchImageToBase64(imageURL)]);
       continue;
     }
-    promises.push(preparePayload(req, file));
+    promises.push(loadImagePayload(preparePayload, req, file));
   }
 
   const detail = req.body.imageDetail ?? ImageDetail.auto;
 
-  /** @type {Array<[MongoFile, string]>} */
+  /** @type {Array<[MongoFile, string] | null>} */
   const formattedImages = await Promise.all(promises);
   promises.length = 0;
 
@@ -170,7 +193,12 @@ async function encodeAndFormat(req, files, params, mode) {
     configuredFileSizeLimit = endpointConfig?.fileSizeLimit;
   }
 
-  for (const [file, imageContent] of formattedImages) {
+  for (const formatted of formattedImages) {
+    if (formatted == null) {
+      continue;
+    }
+
+    const [file, imageContent] = formatted;
     const fileMetadata = {
       type: file.type,
       file_id: file.file_id,
