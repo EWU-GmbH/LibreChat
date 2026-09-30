@@ -12,6 +12,7 @@ import type { FilterQuery } from 'mongoose';
 import type { Response } from 'express';
 import type { ServerRequest } from '~/types/http';
 import { parsePagination } from './pagination';
+import { toIsoString } from './dates';
 
 const MAX_SEARCH_LENGTH = 200;
 
@@ -65,8 +66,8 @@ export function createAdminUsersHandlers(deps: AdminUsersDeps): {
         avatar: u.avatar ?? '',
         role: u.role ?? 'USER',
         provider: u.provider ?? 'local',
-        createdAt: u.createdAt?.toISOString(),
-        updatedAt: u.updatedAt?.toISOString(),
+        createdAt: toIsoString(u.createdAt),
+        updatedAt: toIsoString(u.updatedAt),
       }));
 
       return res.status(200).json({ users: mapped, total, limit, offset });

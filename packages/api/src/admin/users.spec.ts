@@ -119,6 +119,28 @@ describe('createAdminUsersHandlers', () => {
       expect(json.mock.calls[0][0].total).toBe(0);
     });
 
+    it('serializes string createdAt/updatedAt from lean documents', async () => {
+      const deps = createDeps({
+        findUsers: jest.fn().mockResolvedValue([
+          mockUser({
+            createdAt: '2024-06-15T12:00:00.000Z' as unknown as Date,
+            updatedAt: '2025-01-02T08:30:00.000Z' as unknown as Date,
+          }),
+        ]),
+        countUsers: jest.fn().mockResolvedValue(1),
+      });
+      const handlers = createAdminUsersHandlers(deps);
+      const { req, res, status, json } = createReqRes();
+
+      await handlers.listUsers(req, res);
+
+      expect(status).toHaveBeenCalledWith(200);
+      expect(json.mock.calls[0][0].users[0]).toMatchObject({
+        createdAt: '2024-06-15T12:00:00.000Z',
+        updatedAt: '2025-01-02T08:30:00.000Z',
+      });
+    });
+
     it('returns 500 when findUsers throws', async () => {
       const deps = createDeps({ findUsers: jest.fn().mockRejectedValue(new Error('db down')) });
       const handlers = createAdminUsersHandlers(deps);
