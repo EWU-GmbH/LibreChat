@@ -39,6 +39,7 @@ const { getFileStrategy } = require('~/server/utils/getFileStrategy');
 const { checkCapability } = require('~/server/services/Config');
 const { LB_QueueAsyncCall } = require('~/server/utils/queue');
 const { getRetentionExpiry, getAgentFileRetentionExpiry } = require('./retention');
+const { isMissingStorageError } = require('./storageError');
 const { getStrategyFunctions } = require('./strategies');
 const { determineFileType } = require('~/server/utils');
 const { STTService } = require('./Audio/STTService');
@@ -68,17 +69,6 @@ const createSanitizedUploadWrapper = (uploadFunction) => {
 };
 
 const hasCodeEnvRef = (file) => file?.metadata?.codeEnvRef != null;
-
-const isMissingStorageError = (err) => {
-  const code = err?.code ?? err?.status ?? err?.statusCode ?? err?.response?.status;
-  if ([404, '404', 'ENOENT', 'NoSuchKey', 'NotFound', 'ResourceNotFound'].includes(code)) {
-    return true;
-  }
-
-  return /(?:file|object|blob|key|resource) (?:not found|does not exist)|no such (?:file|key)/i.test(
-    String(err?.message ?? ''),
-  );
-};
 
 /**
  * Enqueues the delete operation to the leaky bucket queue if necessary, or adds it directly to promises.

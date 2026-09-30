@@ -1,5 +1,6 @@
 const { resolveDocumentImageReferences } = require('@librechat/api');
 const { FileContext, FileSources } = require('librechat-data-provider');
+const { isMissingStorageError } = require('./storageError');
 const { getStrategyFunctions } = require('./strategies');
 const { getFiles } = require('~/models');
 
@@ -14,24 +15,6 @@ function latestImageOffset(fileId) {
     return null;
   }
   return match[1] ? Number(match[1]) : 0;
-}
-const MISSING_STORAGE_CODES = new Set([
-  404,
-  '404',
-  'ENOENT',
-  'NoSuchKey',
-  'NotFound',
-  'ResourceNotFound',
-]);
-
-function isMissingStorageError(err) {
-  const code = err?.code ?? err?.status ?? err?.statusCode ?? err?.response?.status;
-  if (MISSING_STORAGE_CODES.has(code)) {
-    return true;
-  }
-  return /(?:file|object|blob|key|resource) (?:not found|does not exist)|no such (?:file|key)/i.test(
-    String(err?.message ?? ''),
-  );
 }
 
 async function readLimitedBuffer(stream, maxBytes) {

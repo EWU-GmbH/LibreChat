@@ -46,35 +46,90 @@ const logChatRequest = (request: Record<string, unknown>) => {
   logger.log('=====================================');
 };
 
-const getAppendParentMessageId = ({
+const isPreliminaryResponseId = (messageId?: string | null): messageId is string =>
+  typeof messageId === 'string' && messageId.endsWith('_');
+
+const ownsFailedPreliminaryResponse = (message: TMessage, messages: TMessage[]) => {
+  if (message.isCreatedByUser !== true || message.messageId == null) {
+    return false;
+  }
+  const responseId = `${message.messageId}_`;
+  return messages.some(
+    (candidate) =>
+      candidate.messageId === responseId &&
+      candidate.isCreatedByUser !== true &&
+      (candidate.error === true || hasStreamStartFailed(candidate)),
+  );
+};
+
+export const getAppendParentMessageId = ({
   latestMessage,
   currentMessages,
 }: {
   latestMessage: TMessage | null;
   currentMessages: TMessage[];
 }) => {
-  if (!latestMessage) {
+  if (latestMessage?.messageId == null) {
     return Constants.NO_PARENT;
   }
 
-  if (!hasStreamStartFailed(latestMessage)) {
-    return latestMessage.messageId;
+  const messages = currentMessages.some((message) => message.messageId === latestMessage.messageId)
+    ? currentMessages
+    : [...currentMessages, latestMessage];
+  const byId = new Map<string, TMessage>();
+  for (const message of messages) {
+    if (message.messageId) {
+      byId.set(message.messageId, message);
+    }
   }
 
-  const failedUserMessage = currentMessages.find(
-    (message) => message.messageId === latestMessage.parentMessageId,
-  );
-  if (failedUserMessage?.isCreatedByUser !== true) {
-    return latestMessage.messageId;
+  let current: TMessage | undefined = latestMessage;
+  const seen = new Set<string>();
+
+  while (current?.messageId && !seen.has(current.messageId)) {
+    seen.add(current.messageId);
+
+    if (hasStreamStartFailed(current) && current.isCreatedByUser !== true) {
+      const failedUser = byId.get(current.parentMessageId ?? '');
+      if (failedUser?.isCreatedByUser === true) {
+        const ancestorId = failedUser.parentMessageId ?? Constants.NO_PARENT;
+        const ancestor = byId.get(ancestorId);
+        if (!ancestor) {
+          return isPreliminaryResponseId(ancestorId) ? Constants.NO_PARENT : ancestorId;
+        }
+        current = ancestor;
+        continue;
+      }
+      if (!isPreliminaryResponseId(current.messageId)) {
+        return current.messageId;
+      }
+    }
+
+    const preliminaryResponse =
+      current.isCreatedByUser !== true && isPreliminaryResponseId(current.messageId);
+    if (!preliminaryResponse && !ownsFailedPreliminaryResponse(current, messages)) {
+      return current.messageId;
+    }
+
+    const parentId = current.parentMessageId;
+    if (parentId == null || parentId === '') {
+      return Constants.NO_PARENT;
+    }
+    const parent = byId.get(parentId);
+    if (!parent) {
+      return isPreliminaryResponseId(parentId) ? Constants.NO_PARENT : parentId;
+    }
+    current = parent;
   }
 
-  return failedUserMessage.parentMessageId ?? Constants.NO_PARENT;
+  return Constants.NO_PARENT;
 };
 
-const hasPendingAssistantParent = (message: TMessage | null) =>
+export const hasPendingAssistantParent = (message: TMessage | null) =>
   !!message?.messageId &&
   message.isCreatedByUser !== true &&
   message.messageId.endsWith('_') &&
+  message.error !== true &&
   message.createdAt == null &&
   message.updatedAt == null &&
   !hasStreamStartFailed(message);

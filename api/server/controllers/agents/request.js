@@ -18,6 +18,7 @@ const {
   getMCPRequestContext,
   cleanupMCPRequestContextForReq,
 } = require('~/server/services/MCPRequestContext');
+const { persistFailedResumableTurn, toSafeGenerationErrorText } = require('./failedTurn');
 const { handleAbortError } = require('~/server/middleware');
 const { logViolation } = require('~/cache');
 const { saveMessage, getMessages, getConvo } = require('~/models');
@@ -700,8 +701,68 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
           // abortJob already handled emitDone and completeJob
         } else {
           logger.error(`[ResumableAgentController] Generation error for ${streamId}:`, error);
-          await GenerationJobManager.emitError(streamId, error.message || 'Generation failed');
-          GenerationJobManager.completeJob(streamId, error.message);
+          const safeText = toSafeGenerationErrorText(error);
+          const currentJob = await GenerationJobManager.getJob(streamId);
+          const jobWasReplaced = !currentJob || currentJob.createdAt !== jobCreatedAt;
+          if (jobWasReplaced) {
+            logger.debug(
+              `[ResumableAgentController] Skipping failed-turn persist - job was replaced`,
+              { streamId },
+            );
+          } else {
+            try {
+              const sourceUserMessage =
+                userMessage ??
+                getPreliminaryUserMessage(
+                  {
+                    messageId: req.body?.messageId,
+                    parentMessageId: req.body?.parentMessageId,
+                    text: req.body?.text,
+                    quotes: req.body?.quotes,
+                  },
+                  conversationId,
+                );
+              const persisted = await persistFailedResumableTurn({
+                req,
+                userId,
+                conversationId,
+                endpointOption,
+                userMessage: sourceUserMessage,
+                sender: client?.sender,
+                model: responseModel,
+                iconURL: endpointIconURL,
+                skipSaveUserMessage: client?.skipSaveUserMessage === true && userMessage != null,
+                error,
+              });
+              if (persisted) {
+                const finalEvent = {
+                  final: true,
+                  conversation: persisted.conversation,
+                  title: persisted.conversation?.title ?? null,
+                  requestMessage: sanitizeMessageForTransmit(persisted.requestMessage),
+                  responseMessage: persisted.responseMessage,
+                };
+                logger.debug(`[ResumableAgentController] Emitting failed-turn FINAL event`, {
+                  streamId,
+                  userMessageId: persisted.requestMessage?.messageId,
+                  responseMessageId: persisted.responseMessage?.messageId,
+                  conversationId,
+                });
+                await GenerationJobManager.emitDone(streamId, finalEvent);
+                GenerationJobManager.completeJob(streamId);
+              } else {
+                await GenerationJobManager.emitError(streamId, safeText);
+                GenerationJobManager.completeJob(streamId, safeText);
+              }
+            } catch (persistError) {
+              logger.error(
+                `[ResumableAgentController] Failed to persist generation error for ${streamId}:`,
+                persistError,
+              );
+              await GenerationJobManager.emitError(streamId, safeText);
+              GenerationJobManager.completeJob(streamId, safeText);
+            }
+          }
         }
 
         await finishResumableRequest(req, userId);

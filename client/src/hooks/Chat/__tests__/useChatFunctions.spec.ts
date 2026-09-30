@@ -1,5 +1,8 @@
+import { Constants } from 'librechat-data-provider';
 import type { TMessage } from 'librechat-data-provider';
 import {
+  getAppendParentMessageId,
+  hasPendingAssistantParent,
   getRegenerateSubmissionMessages,
   getPreliminaryRegenerateResponseMessageId,
   getRegenerateTargetResponseMessage,
@@ -125,5 +128,96 @@ describe('regenerate response targeting', () => {
         .map((message) => message.messageId)
         .sort(),
     ).toEqual(['assistant-1b', 'user-1']);
+  });
+});
+
+describe('getAppendParentMessageId', () => {
+  const erroredPreliminary = (userId: string): TMessage =>
+    ({
+      ...assistantMessage(`${userId}_`, userId),
+      error: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }) as TMessage;
+
+  it('uses the latest persisted assistant response as parent', () => {
+    const messages = [userMessage('user-1'), assistantMessage('assistant-1', 'user-1')];
+
+    expect(
+      getAppendParentMessageId({ latestMessage: messages[1], currentMessages: messages }),
+    ).toBe('assistant-1');
+  });
+
+  it('does not parent on an errored preliminary `_` response id', () => {
+    const messages = [
+      userMessage('user-1'),
+      assistantMessage('assistant-1', 'user-1'),
+      userMessage('user-2', 'assistant-1'),
+      erroredPreliminary('user-2'),
+    ];
+
+    expect(
+      getAppendParentMessageId({ latestMessage: messages[3], currentMessages: messages }),
+    ).toBe('assistant-1');
+  });
+
+  it('walks past several unsaved failed turns to the nearest persisted ancestor', () => {
+    const messages = [
+      userMessage('user-1'),
+      assistantMessage('assistant-1', 'user-1'),
+      userMessage('user-2', 'assistant-1'),
+      erroredPreliminary('user-2'),
+      userMessage('user-3', 'user-2_'),
+      erroredPreliminary('user-3'),
+    ];
+
+    expect(
+      getAppendParentMessageId({ latestMessage: messages[5], currentMessages: messages }),
+    ).toBe('assistant-1');
+  });
+
+  it('falls back to NO_PARENT when the whole thread is unsaved', () => {
+    const messages = [userMessage('user-1'), erroredPreliminary('user-1')];
+
+    expect(
+      getAppendParentMessageId({ latestMessage: messages[1], currentMessages: messages }),
+    ).toBe(Constants.NO_PARENT);
+  });
+
+  it('skips a user message whose preliminary response failed', () => {
+    const messages = [
+      userMessage('user-1'),
+      assistantMessage('assistant-1', 'user-1'),
+      userMessage('user-2', 'assistant-1'),
+      erroredPreliminary('user-2'),
+    ];
+
+    expect(
+      getAppendParentMessageId({ latestMessage: messages[2], currentMessages: messages }),
+    ).toBe('assistant-1');
+  });
+
+  it('keeps a persisted error response as a valid parent', () => {
+    const errored = { ...assistantMessage('assistant-err', 'user-1'), error: true } as TMessage;
+    const messages = [userMessage('user-1'), errored];
+
+    expect(getAppendParentMessageId({ latestMessage: errored, currentMessages: messages })).toBe(
+      'assistant-err',
+    );
+  });
+});
+
+describe('hasPendingAssistantParent', () => {
+  it('treats an errored preliminary response as not pending', () => {
+    expect(
+      hasPendingAssistantParent({
+        ...assistantMessage('user-1_', 'user-1'),
+        error: true,
+      } as TMessage),
+    ).toBe(false);
+  });
+
+  it('treats a streaming preliminary response without timestamps as pending', () => {
+    expect(hasPendingAssistantParent(assistantMessage('user-1_', 'user-1'))).toBe(true);
   });
 });
