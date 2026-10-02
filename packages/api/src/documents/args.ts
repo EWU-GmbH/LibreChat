@@ -145,13 +145,13 @@ const toolGuide =
   'Markdown in `content` bleibt möglich, inklusive ![alt](url) und - [ ] Checklisten.';
 
 export const createDocxDescription =
-  'Erstellt eine herunterladbare Word-Datei. ' +
+  'Erstellt eine Word-Datei und liefert sie als Dateianhang. Gib keine Download-URL aus. ' +
   'layout ist ein Objekt und blocks ein Array von Block-Objekten. ' +
   'Beides als strukturierte Argumente übergeben, niemals als JSON-Text und niemals innerhalb von content. ' +
   'content ist optionaler Markdown-Text.' +
   toolGuide;
 
-export const createPdfDescription = `Erstellt eine herunterladbare PDF-Datei.${toolGuide}`;
+export const createPdfDescription = `Erstellt eine PDF-Datei und liefert sie als Dateianhang. Gib keine Download-URL aus.${toolGuide}`;
 
 const exampleCall = {
   filename: 'bericht.docx',

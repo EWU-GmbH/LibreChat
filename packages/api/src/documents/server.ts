@@ -15,6 +15,7 @@ import {
 } from './args';
 import { resolveDocumentPath, storeDocument } from './storage';
 import { createDocx, createPdf, createXlsx } from './builders';
+import { documentAttachment } from './result';
 import { fetchUrl } from './fetch';
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -64,17 +65,6 @@ async function readJsonBody(req: IncomingMessage): Promise<JsonValue> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as JsonValue;
 }
 
-function documentResult(filename: string, url: string, bytes: number) {
-  return {
-    content: [
-      {
-        type: 'text' as const,
-        text: `Dokument erstellt: [${filename}](${url}) (${bytes} Bytes). Der Link ist 30 Tage gültig.`,
-      },
-    ],
-  };
-}
-
 function fetchedPageResult(page: Awaited<ReturnType<typeof fetchUrl>>) {
   const images = page.images.length
     ? page.images.map((image) => `- ${image.alt ?? 'Bild'}: ${image.url}`).join('\n')
@@ -108,7 +98,7 @@ async function storeGeneratedFile(filename: string, extension: string, data: Buf
 }
 
 function createMcpServer(): McpServer {
-  const server = new McpServer({ name: 'ewu-documents', version: '1.3.0' });
+  const server = new McpServer({ name: 'ewu-documents', version: '1.4.0' });
 
   server.tool(
     'fetch_url',
@@ -133,13 +123,13 @@ function createMcpServer(): McpServer {
       }
       const data = await createDocx(resolved.input);
       const stored = await storeGeneratedFile(resolved.filename, '.docx', data);
-      return documentResult(stored.filename, stored.url, data.length);
+      return documentAttachment(stored.filename, data);
     },
   );
 
   server.tool(
     'create_xlsx',
-    'Erstellt eine herunterladbare Excel-Arbeitsmappe mit bis zu 20 Tabellenblättern. Optional headerFill/headerColor für die Kopfzeile.',
+    'Erstellt eine Excel-Arbeitsmappe mit bis zu 20 Tabellenblättern und liefert sie als Dateianhang. Gib keine Download-URL aus. Optional headerFill/headerColor für die Kopfzeile.',
     {
       filename: z.string().min(1).max(120),
       sheets: z.array(sheetSchema).min(1).max(20),
@@ -147,7 +137,7 @@ function createMcpServer(): McpServer {
     async ({ filename, sheets }) => {
       const data = await createXlsx(sheets as SheetInput[]);
       const stored = await storeGeneratedFile(filename, '.xlsx', data);
-      return documentResult(stored.filename, stored.url, data.length);
+      return documentAttachment(stored.filename, data);
     },
   );
 
@@ -167,7 +157,7 @@ function createMcpServer(): McpServer {
       };
       const data = await createPdf(input);
       const stored = await storeGeneratedFile(filename, '.pdf', data);
-      return documentResult(stored.filename, stored.url, data.length);
+      return documentAttachment(stored.filename, data);
     },
   );
 
