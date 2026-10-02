@@ -1172,10 +1172,9 @@ async function retrieveAndProcessFile({
  */
 function base64ToBuffer(base64String) {
   try {
-    const typeMatch = base64String.match(/^data:([A-Za-z-+/]+);base64,/);
-    const type = typeMatch ? typeMatch[1] : '';
-
-    const base64Data = base64String.replace(/^data:([A-Za-z-+/]+);base64,/, '');
+    const dataUrlMatch = /^data:([^;,]+);base64,([\s\S]*)$/.exec(base64String);
+    const type = dataUrlMatch ? dataUrlMatch[1] : '';
+    const base64Data = dataUrlMatch ? dataUrlMatch[2] : base64String;
 
     if (!base64Data) {
       throw new Error('Invalid base64 string');
@@ -1383,6 +1382,7 @@ function filterFile({ req, image, isAvatar }) {
 module.exports = {
   filterFile,
   processFileURL,
+  base64ToBuffer,
   saveBase64Image,
   saveBase64File,
   processImageFile,
