@@ -144,6 +144,7 @@ const { getStrategyFunctions } = require('~/server/services/Files/strategies');
 const { uploadVectors } = require('./VectorDB/crud');
 const db = require('~/models');
 const {
+  base64ToBuffer,
   processAgentFileUpload,
   processDeleteRequest,
   processFileURL,
@@ -1276,6 +1277,28 @@ describe('processDeleteRequest', () => {
     expect(codeDelete).toHaveBeenCalledWith(req, file);
     expect(db.deleteFiles).toHaveBeenCalledWith(['code-resource-file']);
     expect(result).toEqual({ deletedFileIds: ['code-resource-file'], failedFileIds: [] });
+  });
+});
+
+describe('base64ToBuffer', () => {
+  it('decodes Office MIME types without prepending the data-URL prefix', () => {
+    const original = Buffer.from('PK\u0003\u0004docx-bytes');
+    const dataUrl = `data:${DOCX_MIME};base64,${original.toString('base64')}`;
+
+    const { buffer, type } = base64ToBuffer(dataUrl);
+
+    expect(type).toBe(DOCX_MIME);
+    expect(buffer).toEqual(original);
+  });
+
+  it('still reads image data URLs', () => {
+    const original = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const dataUrl = `data:image/png;base64,${original.toString('base64')}`;
+
+    const { buffer, type } = base64ToBuffer(dataUrl);
+
+    expect(type).toBe('image/png');
+    expect(buffer).toEqual(original);
   });
 });
 
