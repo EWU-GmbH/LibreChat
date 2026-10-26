@@ -294,7 +294,37 @@ def _restore_tool_calls(tool_calls: Any, pseudo: Pseudonymizer) -> None:
             function["arguments"] = pseudo.restore(function["arguments"])
 
 
-async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymizer) -> AsyncGenerator[bytes, None]:
+async def _stream_upstream(
+    url: str,
+    payload: Dict[str, Any],
+    pseudo: Pseudonymizer,
+) -> AsyncGenerator[bytes, None]:
+    for attempt in range(2):
+        emitted_response_bytes = {"value": False}
+        try:
+            async for chunk in _stream_upstream_attempt(
+                url,
+                payload,
+                pseudo,
+                emitted_response_bytes,
+            ):
+                yield chunk
+            return
+        except httpx.RemoteProtocolError as error:
+            if emitted_response_bytes["value"] or attempt == 1:
+                raise
+            log.warning(
+                "Upstream disconnected before streaming response bytes; retrying once: %s",
+                error,
+            )
+
+
+async def _stream_upstream_attempt(
+    url: str,
+    payload: Dict[str, Any],
+    pseudo: Pseudonymizer,
+    emitted_response_bytes: Dict[str, bool],
+) -> AsyncGenerator[bytes, None]:
     restorer = StreamRestorer(pseudo)
     # Per-tool-call-index restorers so a placeholder split across argument
     # fragments (e.g. "[PER" + "SON_1]") is still stitched back together.
@@ -324,11 +354,14 @@ async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymi
                     tail = restorer.flush()
                     if tail:
                         restored_full.append(tail)
+                        emitted_response_bytes["value"] = True
                         yield _sse_delta(tail)
                     for idx, ar in arg_restorers.items():
                         arg_tail = ar.flush()
                         if arg_tail:
+                            emitted_response_bytes["value"] = True
                             yield _sse_tool_arg_delta(idx, arg_tail)
+                    emitted_response_bytes["value"] = True
                     yield b"data: [DONE]\n\n"
                     break
                 chunk = _try_json(data_str)
@@ -343,6 +376,7 @@ async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymi
                 emitted = _restore_stream_chunk(chunk, restorer, arg_restorers, pseudo)
                 if emitted:
                     restored_full.append(emitted)
+                emitted_response_bytes["value"] = True
                 yield f"data: {json.dumps(chunk)}\n\n".encode()
     log.info(
         "Upstream stream completed in %.1fms",
