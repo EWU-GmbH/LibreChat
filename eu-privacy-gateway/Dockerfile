@@ -1,8 +1,9 @@
 # EU Privacy Gateway — OpenAI-compatible PII-masking proxy.
 #
-# The image bakes in the heavy NLP assets so the first request is fast:
-#   - spaCy German model (de_core_news_lg)
-#   - GLiNER weights (urchade/gliner_multi_pii-v1) when GLiNER is enabled
+# The image bakes in the heavy NLP assets:
+#   - spaCy German model (de_core_news_lg) — loaded at process start
+#   - GLiNER weights (urchade/gliner_multi_pii-v1) into HF cache — loaded lazily
+#     on the first pii_protection opt-in (~30s cold), not at boot
 #
 # torch is installed from the CPU-only wheel index to keep the image small and
 # avoid pulling CUDA. GLiNER can be disabled at runtime with GATEWAY_USE_GLINER=0
