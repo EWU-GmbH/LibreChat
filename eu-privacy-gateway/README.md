@@ -40,9 +40,22 @@ otherwise logs go to stdout only.
 ## Container
 
 `Dockerfile` builds a CPU-only image that bakes in the spaCy `de_core_news_lg`
-model and (when enabled) the GLiNER weights, so first boot is fast. It runs
-`uvicorn gateway.app:app --host 0.0.0.0 --port $PORT`. GLiNER can be disabled
-with `GATEWAY_USE_GLINER=0` (falls back to spaCy + regex, lower name recall).
+model and (when enabled) the GLiNER weights into the HF cache. It runs
+`python -m gateway.serve`. **Boot loads spaCy + regex only**; GLiNER weights
+load lazily on the first `pii_protection` opt-in (single-flight, ~30s cold).
+Disable with `GATEWAY_USE_GLINER=0` (spaCy + regex only, lower name recall).
+
+### GLiNER lazy load & idle unload
+
+| Env | Default | Notes |
+| --- | --- | --- |
+| `GATEWAY_USE_GLINER` | `1` | `0` skips registering GLiNER entirely |
+| `GLINER_IDLE_UNLOAD_MINUTES` | `20` (recommended 15–30) | Minutes without opt-in use before weights are dropped; `0` keeps them resident. **Documented only — do not set on Railway from this change.** |
+| `GATEWAY_UPSTREAM_TIMEOUT_SECONDS` | `300` | Upstream HTTP timeout after masking (must outlive cold load + generation) |
+
+LibreChat should keep the LLM request `timeout` at least **180000 ms** when
+PII protection is on (`applyPiiProtection` raises it automatically). The UI
+toggle labels the first request as ~30s.
 
 ## Architecture
 

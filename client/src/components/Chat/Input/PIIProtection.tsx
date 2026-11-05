@@ -13,15 +13,19 @@ function PIIProtection() {
 
   const { toggleState, debouncedChange } = context.piiProtection;
 
+  const label = localize('com_ui_pii_protection');
+
   return (
-    <CheckboxButton
-      className="max-w-fit"
-      checked={toggleState === true}
-      setValue={debouncedChange}
-      label={localize('com_ui_pii_protection')}
-      isCheckedClassName="border-emerald-600/40 bg-emerald-500/10 hover:bg-emerald-700/10"
-      icon={<ShieldCheck className="icon-md" aria-hidden="true" />}
-    />
+    <span title={label} className="inline-flex max-w-fit">
+      <CheckboxButton
+        className="max-w-fit"
+        checked={toggleState === true}
+        setValue={debouncedChange}
+        label={label}
+        isCheckedClassName="border-emerald-600/40 bg-emerald-500/10 hover:bg-emerald-700/10"
+        icon={<ShieldCheck className="icon-md" aria-hidden="true" />}
+      />
+    </span>
   );
 }
 

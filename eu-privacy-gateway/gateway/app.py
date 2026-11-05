@@ -23,7 +23,11 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from .pii import Pseudonymizer, StreamRestorer, get_analyzer
+from .pii import Pseudonymizer, StreamRestorer, ensure_gliner_loaded, get_analyzer
+
+# Upstream HTTP timeout. Must outlive a cold GLiNER load (~30s) plus model
+# generation; keep generous so opt-in requests are not aborted mid-load.
+UPSTREAM_HTTP_TIMEOUT_SECONDS = float(os.environ.get("GATEWAY_UPSTREAM_TIMEOUT_SECONDS", "300"))
 
 # Verbose audit logging prints RAW PII and the placeholder->value mapping. It is
 # a DEV-ONLY affordance for demonstrating masking and MUST stay off in
@@ -77,14 +81,16 @@ app = FastAPI(title="EU Privacy Gateway", version="0.1.0")
 
 @app.on_event("startup")
 def _startup() -> None:
-    log.info("Loading Presidio analyzer (spaCy de_core_news_lg) ...")
+    log.info("Loading Presidio analyzer (spaCy de_core_news_lg + regex; GLiNER deferred) ...")
     get_analyzer()
     log.info(
-        "Gateway ready. Upstream provider=%s base_url=%s default_model=%s verbose_audit=%s",
+        "Gateway ready. Upstream provider=%s base_url=%s default_model=%s "
+        "verbose_audit=%s upstream_timeout_s=%s",
         UPSTREAM["provider"],
         UPSTREAM["base_url"],
         UPSTREAM["default_model"],
         VERBOSE_AUDIT,
+        UPSTREAM_HTTP_TIMEOUT_SECONDS,
     )
     if VERBOSE_AUDIT:
         log.warning(
@@ -233,7 +239,13 @@ async def chat_completions(request: Request) -> Any:
     stream: bool = bool(body.get("stream", False))
     full_analysis = body.pop("pii_protection", False) is True
 
-    pseudo = Pseudonymizer(get_analyzer())
+    analyzer = get_analyzer()
+    if full_analysis:
+        # Single-flight lazy load; may block ~30s on the first opt-in. No local
+        # timeout — LibreChat should use a request timeout ≥ 180s for this path.
+        ensure_gliner_loaded(analyzer)
+
+    pseudo = Pseudonymizer(analyzer)
     masked_messages = _mask_messages(messages, pseudo, full_analysis=full_analysis)
     log.info("PII analysis mode: %s", "GLiNER opt-in" if full_analysis else "regex default")
     _log_mask_summary(messages, masked_messages, pseudo)
@@ -252,7 +264,7 @@ async def chat_completions(request: Request) -> Any:
 
 async def _complete_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymizer) -> Any:
     started_at = time.perf_counter()
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=UPSTREAM_HTTP_TIMEOUT_SECONDS) as client:
         resp = await client.post(url, json=payload, headers=_headers())
     log.info(
         "Upstream non-stream response completed in %.1fms",
@@ -294,7 +306,37 @@ def _restore_tool_calls(tool_calls: Any, pseudo: Pseudonymizer) -> None:
             function["arguments"] = pseudo.restore(function["arguments"])
 
 
-async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymizer) -> AsyncGenerator[bytes, None]:
+async def _stream_upstream(
+    url: str,
+    payload: Dict[str, Any],
+    pseudo: Pseudonymizer,
+) -> AsyncGenerator[bytes, None]:
+    for attempt in range(2):
+        emitted_response_bytes = {"value": False}
+        try:
+            async for chunk in _stream_upstream_attempt(
+                url,
+                payload,
+                pseudo,
+                emitted_response_bytes,
+            ):
+                yield chunk
+            return
+        except httpx.RemoteProtocolError as error:
+            if emitted_response_bytes["value"] or attempt == 1:
+                raise
+            log.warning(
+                "Upstream disconnected before streaming response bytes; retrying once: %s",
+                error,
+            )
+
+
+async def _stream_upstream_attempt(
+    url: str,
+    payload: Dict[str, Any],
+    pseudo: Pseudonymizer,
+    emitted_response_bytes: Dict[str, bool],
+) -> AsyncGenerator[bytes, None]:
     restorer = StreamRestorer(pseudo)
     # Per-tool-call-index restorers so a placeholder split across argument
     # fragments (e.g. "[PER" + "SON_1]") is still stitched back together.
@@ -302,7 +344,7 @@ async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymi
     restored_full: List[str] = []
     started_at = time.perf_counter()
     first_event_logged = False
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=UPSTREAM_HTTP_TIMEOUT_SECONDS) as client:
         async with client.stream("POST", url, json=payload, headers=_headers()) as resp:
             log.info(
                 "Upstream stream headers received in %.1fms",
@@ -324,11 +366,14 @@ async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymi
                     tail = restorer.flush()
                     if tail:
                         restored_full.append(tail)
+                        emitted_response_bytes["value"] = True
                         yield _sse_delta(tail)
                     for idx, ar in arg_restorers.items():
                         arg_tail = ar.flush()
                         if arg_tail:
+                            emitted_response_bytes["value"] = True
                             yield _sse_tool_arg_delta(idx, arg_tail)
+                    emitted_response_bytes["value"] = True
                     yield b"data: [DONE]\n\n"
                     break
                 chunk = _try_json(data_str)
@@ -343,6 +388,7 @@ async def _stream_upstream(url: str, payload: Dict[str, Any], pseudo: Pseudonymi
                 emitted = _restore_stream_chunk(chunk, restorer, arg_restorers, pseudo)
                 if emitted:
                     restored_full.append(emitted)
+                emitted_response_bytes["value"] = True
                 yield f"data: {json.dumps(chunk)}\n\n".encode()
     log.info(
         "Upstream stream completed in %.1fms",

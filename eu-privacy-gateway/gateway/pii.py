@@ -95,10 +95,17 @@ _ANALYSIS_CACHE_LOCK = Lock()
 # acceptable, so the gateway is tuned for high recall on PERSON NAMES and STREET
 # ADDRESSES. GLiNER (a zero-shot span model) complements spaCy, which alone
 # misses names such as "Dr. Müller".
+#
+# Weights are NOT loaded at process start. Regex/spaCy always run; GLiNER loads
+# on the first ``pii_protection`` opt-in (single-flight) and may idle-unload.
 GLINER_ENABLED = os.environ.get("GATEWAY_USE_GLINER", "1").lower() not in {"0", "false", "no"}
 GLINER_MODEL = os.environ.get("GLINER_MODEL", "urchade/gliner_multi_pii-v1")
 # Recall-oriented detection threshold for GLiNER itself.
 GLINER_THRESHOLD = float(os.environ.get("GLINER_THRESHOLD", "0.30"))
+# Idle unload after this many minutes without opt-in use. Default 20 (range
+# 15–30). Set ``0`` to keep the model resident once loaded. Documented only —
+# do not set on Railway from this change.
+DEFAULT_GLINER_IDLE_UNLOAD_MINUTES = 20.0
 # GLiNER prompt labels -> Presidio entity types. Focused on names + addresses;
 # ``organization`` is intentionally omitted (it mislabels pronouns like "Wir"
 # and adds noise without helping the name/address recall goal).
@@ -107,6 +114,20 @@ GLINER_LABEL_MAP: Dict[str, str] = {
     "name": "PERSON",
     "address": "DE_ADDRESS",
 }
+
+_GLINER_LOAD_LOCK = Lock()
+
+
+def gliner_idle_unload_minutes() -> float:
+    """Return configured idle-unload minutes (``0`` disables unload)."""
+    raw = os.environ.get(
+        "GLINER_IDLE_UNLOAD_MINUTES",
+        str(int(DEFAULT_GLINER_IDLE_UNLOAD_MINUTES)),
+    )
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_GLINER_IDLE_UNLOAD_MINUTES
 
 # --- PERSON precision filter ----------------------------------------------
 # spaCy + GLiNER are high recall but, on German, frequently mislabel ordinary
@@ -175,26 +196,30 @@ def _build_analyzer() -> AnalyzerEngine:
         gliner = _try_build_gliner_recognizer()
         if gliner is not None:
             analyzer.registry.add_recognizer(gliner)
-            log.info("GLiNER recognizer registered (model=%s, threshold=%s)", GLINER_MODEL, GLINER_THRESHOLD)
+            log.info(
+                "GLiNER recognizer registered lazy (model=%s, threshold=%s, "
+                "idle_unload_minutes=%s); weights load on first pii_protection opt-in",
+                GLINER_MODEL,
+                GLINER_THRESHOLD,
+                gliner_idle_unload_minutes(),
+            )
 
     return analyzer
 
 
 def _try_build_gliner_recognizer() -> Optional["GLiNERRecognizer"]:
-    """Build the GLiNER recognizer, degrading gracefully if it is unavailable.
+    """Register the GLiNER recognizer without loading weights.
 
-    If GLiNER/torch cannot be imported or the model cannot be loaded, the
-    gateway falls back to spaCy + regex so masking still works (with lower
-    name recall).
+    Construction stays cheap so boot only pays for spaCy + regex. Weights load
+    on the first opt-in via :meth:`GLiNERRecognizer.ensure_loaded` (single-flight).
+    If construction itself fails, the gateway falls back to spaCy + regex.
     """
     try:
-        recognizer = GLiNERRecognizer(
+        return GLiNERRecognizer(
             model_name=GLINER_MODEL,
             label_map=GLINER_LABEL_MAP,
             threshold=GLINER_THRESHOLD,
         )
-        recognizer.load()
-        return recognizer
     except Exception as exc:  # noqa: BLE001 - PoC fallback: never break masking.
         log.warning(
             "GLiNER unavailable (%s); falling back to spaCy + regex only. "
@@ -202,6 +227,23 @@ def _try_build_gliner_recognizer() -> Optional["GLiNERRecognizer"]:
             exc,
         )
         return None
+
+
+def find_gliner_recognizer(analyzer: AnalyzerEngine) -> Optional["GLiNERRecognizer"]:
+    """Return the registered GLiNER recognizer, if any."""
+    for recognizer in analyzer.registry.recognizers:
+        if isinstance(recognizer, GLiNERRecognizer):
+            return recognizer
+    return None
+
+
+def ensure_gliner_loaded(analyzer: AnalyzerEngine) -> bool:
+    """Load GLiNER weights on first opt-in (single-flight). Returns True if ready."""
+    recognizer = find_gliner_recognizer(analyzer)
+    if recognizer is None:
+        return False
+    recognizer.maybe_idle_unload()
+    return recognizer.ensure_loaded()
 
 
 class GLiNERRecognizer(EntityRecognizer):
@@ -212,6 +254,9 @@ class GLiNERRecognizer(EntityRecognizer):
     catches German names that spaCy misses (e.g. "Dr. Müller"). Detected spans
     are returned with a recall-biased score floor so they survive the analyzer
     threshold and get masked.
+
+    Weights load lazily on first opt-in (``ensure_loaded`` / ``analyze``) with a
+    process-wide single-flight lock so concurrent first requests share one load.
     """
 
     _SCORE_FLOOR = 0.6
@@ -228,24 +273,91 @@ class GLiNERRecognizer(EntityRecognizer):
         self._threshold = threshold
         self._prompt_labels = sorted(set(label_map.keys()))
         self._model = None
+        self._load_failed = False
+        self._last_used_mono: Optional[float] = None
         super().__init__(
             supported_entities=sorted(set(label_map.values())),
             supported_language=supported_language,
             name="GLiNERRecognizer",
         )
 
-    def load(self) -> None:
-        if self._model is not None:
-            return
-        from gliner import GLiNER  # imported lazily so the dep stays optional
+    def weights_loaded(self) -> bool:
+        """True when GLiNER model weights are resident in memory."""
+        return self._model is not None
 
-        self._model = GLiNER.from_pretrained(self._model_name)
+    def ensure_loaded(self) -> bool:
+        """Load weights once; concurrent callers wait on the same load.
+
+        No timeout is applied during load — first opt-in can take ~30s.
+        Returns False when GLiNER/torch cannot be imported or the model fails.
+        """
+        if self._model is not None:
+            self._last_used_mono = time.monotonic()
+            return True
+        if self._load_failed:
+            return False
+
+        with _GLINER_LOAD_LOCK:
+            if self._model is not None:
+                self._last_used_mono = time.monotonic()
+                return True
+            if self._load_failed:
+                return False
+            started_at = time.perf_counter()
+            log.info(
+                "Loading GLiNER weights (%s); first opt-in may take ~30s ...",
+                self._model_name,
+            )
+            try:
+                from gliner import GLiNER  # imported lazily so the dep stays optional
+
+                self._model = GLiNER.from_pretrained(self._model_name)
+            except Exception as exc:  # noqa: BLE001 - degrade to spaCy + regex.
+                self._load_failed = True
+                log.warning(
+                    "GLiNER load failed (%s); falling back to spaCy + regex only.",
+                    exc,
+                )
+                return False
+            elapsed_ms = (time.perf_counter() - started_at) * 1000
+            self._last_used_mono = time.monotonic()
+            self.is_loaded = True
+            log.info("GLiNER weights ready in %.1fms", elapsed_ms)
+            return True
+
+    def unload(self) -> None:
+        """Drop weights from memory (idle unload). Next opt-in reloads."""
+        with _GLINER_LOAD_LOCK:
+            if self._model is None:
+                return
+            self._model = None
+            self._last_used_mono = None
+            self.is_loaded = False
+            # Allow a later reload after a previous failure was cleared by unload.
+            self._load_failed = False
+            log.info("GLiNER weights unloaded after idle period")
+
+    def maybe_idle_unload(self) -> bool:
+        """Unload when idle past ``GLINER_IDLE_UNLOAD_MINUTES``. Returns True if unloaded."""
+        minutes = gliner_idle_unload_minutes()
+        if minutes <= 0 or self._model is None or self._last_used_mono is None:
+            return False
+        idle_seconds = time.monotonic() - self._last_used_mono
+        if idle_seconds < minutes * 60.0:
+            return False
+        self.unload()
+        return True
+
+    def load(self) -> None:
+        """Presidio EntityRecognizer API — delegates to single-flight ensure_loaded."""
+        self.ensure_loaded()
 
     def analyze(self, text, entities, nlp_artifacts=None) -> List[RecognizerResult]:
         if not text or not text.strip():
             return []
-        if self._model is None:
-            self.load()
+        self.maybe_idle_unload()
+        if not self.ensure_loaded():
+            return []
 
         try:
             predictions = self._model.predict_entities(
@@ -255,6 +367,7 @@ class GLiNERRecognizer(EntityRecognizer):
             log.warning("GLiNER inference failed (%s); skipping GLiNER for this text.", exc)
             return []
 
+        self._last_used_mono = time.monotonic()
         results: List[RecognizerResult] = []
         for pred in predictions:
             entity_type = self._label_map.get(pred["label"])
