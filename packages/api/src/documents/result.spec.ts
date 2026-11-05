@@ -27,11 +27,20 @@ describe('documentAttachment', () => {
   });
 
   it('picks the spreadsheet and PDF media types', () => {
-    expect(documentAttachment('tabelle.xlsx', data).content[1]?.resource.mimeType).toBe(
+    const xlsx = documentAttachment('tabelle.xlsx', data).content[1];
+    expect(xlsx?.type).toBe('resource');
+    if (xlsx?.type !== 'resource') {
+      return;
+    }
+    expect(xlsx.resource.mimeType).toBe(
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
-    expect(documentAttachment('brief.pdf', data).content[1]?.resource.mimeType).toBe(
-      'application/pdf',
-    );
+
+    const pdf = documentAttachment('brief.pdf', data).content[1];
+    expect(pdf?.type).toBe('resource');
+    if (pdf?.type !== 'resource') {
+      return;
+    }
+    expect(pdf.resource.mimeType).toBe('application/pdf');
   });
 });

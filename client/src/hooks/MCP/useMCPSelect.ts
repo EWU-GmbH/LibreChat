@@ -4,26 +4,15 @@ import isEqual from 'lodash/isEqual';
 import { useRecoilState } from 'recoil';
 import { Constants, LocalStorageKeys } from 'librechat-data-provider';
 import { ephemeralAgentByConvoId, mcpValuesAtomFamily, mcpPinnedAtom } from '~/store';
+import { normalizeMCPSelection } from './normalizeMCPSelection';
 import { MCPServerDefinition } from './useMCPServerManager';
 import { useGetStartupConfig } from '~/data-provider';
 import { setTimestamp } from '~/utils/timestamps';
 
+export { normalizeMCPSelection } from './normalizeMCPSelection';
+
 /** Sentinel in `interface.defaultPinnedTools` that pins the MCP dropdown to the prompt bar. */
 const MCP_PIN_KEYWORD = 'mcp';
-
-/** Deduplicate server names while preserving selection order. */
-export function normalizeMCPSelection(value: string[]): string[] {
-  const seen = new Set<string>();
-  const selected: string[] = [];
-  for (const name of value) {
-    if (typeof name !== 'string' || name.length === 0 || seen.has(name)) {
-      continue;
-    }
-    seen.add(name);
-    selected.push(name);
-  }
-  return selected;
-}
 
 export function useMCPSelect({
   conversationId,
