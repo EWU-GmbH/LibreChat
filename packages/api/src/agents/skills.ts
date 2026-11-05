@@ -679,6 +679,11 @@ export interface ResolveManualSkillsParams {
     author: Types.ObjectId | string;
     deployment?: boolean;
     /**
+     * Provenance discriminator forwarded for `resolveSkillActive`
+     * (`source: 'mcp'` stubs default active, same as deployment skills).
+     */
+    source?: string;
+    /**
      * Skill-declared tool allowlist, forwarded verbatim from the skill doc.
      * Surfaced on `ResolvedManualSkill` so future runtime enforcement can
      * union it into the agent's effective tool set for the turn without
@@ -904,6 +909,11 @@ export interface ResolveAlwaysApplySkillsParams {
       author: Types.ObjectId | string;
       allowedTools?: string[];
       deployment?: boolean;
+      /**
+       * Provenance discriminator forwarded for `resolveSkillActive`
+       * (`source: 'mcp'` stubs default active, same as deployment skills).
+       */
+      source?: string;
     }>;
     has_more?: boolean;
     after?: string | null;

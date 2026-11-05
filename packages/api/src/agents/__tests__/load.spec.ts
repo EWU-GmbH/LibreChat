@@ -582,7 +582,9 @@ describe('loadAgent', () => {
     );
 
     if (result) {
-      expect(result.tools).toEqual([]);
+      // Ephemeral agents always expose request_mcp so the model can opt into
+      // servers even when the user selected none for this turn.
+      expect(result.tools).toEqual([Tools.request_mcp]);
       expect(result.instructions).toBe('Simple instructions');
     } else {
       expect(result).toBeFalsy();
@@ -960,7 +962,7 @@ describe('loadAgent', () => {
     );
 
     if (result) {
-      expect(result.tools).toEqual([]);
+      expect(result.tools).toEqual([Tools.request_mcp]);
     } else {
       expect(result).toBeFalsy();
     }
@@ -1093,7 +1095,7 @@ describe('loadAgent', () => {
       );
 
       if (result) {
-        expect(result.tools).toEqual(['tool_mcp_server1']);
+        expect(result.tools).toEqual(['tool_mcp_server1', Tools.request_mcp]);
         expect(result.tools).not.toContain('malformed_tool_name');
         expect(result.tools).not.toContain('tool__server1');
         expect(result.tools).not.toContain('tool_mcp_server2');

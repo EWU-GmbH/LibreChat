@@ -1,5 +1,3 @@
-/** @jest-environment node */
-
 import { parseRequestMcpServerName } from '../parseRequestMcp';
 
 describe('parseRequestMcpServerName', () => {
@@ -10,5 +8,14 @@ describe('parseRequestMcpServerName', () => {
     );
     expect(parseRequestMcpServerName({ serverName: 'listmonk' })).toBe('listmonk');
     expect(parseRequestMcpServerName('not-json')).toBe('');
+  });
+
+  it('prefers args over output when both provide serverName', () => {
+    expect(
+      parseRequestMcpServerName(
+        { serverName: 'from-args' },
+        '{"serverName":"from-output"}',
+      ),
+    ).toBe('from-args');
   });
 });

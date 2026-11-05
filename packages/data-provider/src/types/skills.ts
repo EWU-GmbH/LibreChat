@@ -28,8 +28,9 @@ export const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
  * `deployment` means the skill was loaded from the server's configured
  * deployment skill directory and is not persisted as a Skill document.
  * `github` is populated by admin-configured GitHub skill sync; `notion` is reserved.
+ * `mcp` marks auto-generated stub skills for configured chat MCP servers.
  */
-export type SkillSource = 'inline' | 'deployment' | 'github' | 'notion';
+export type SkillSource = 'inline' | 'deployment' | 'github' | 'notion' | 'mcp';
 
 /**
  * Category inferred from a skill file's top-level directory prefix.
