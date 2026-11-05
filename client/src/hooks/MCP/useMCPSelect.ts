@@ -4,8 +4,8 @@ import isEqual from 'lodash/isEqual';
 import { useRecoilState } from 'recoil';
 import { Constants, LocalStorageKeys } from 'librechat-data-provider';
 import { ephemeralAgentByConvoId, mcpValuesAtomFamily, mcpPinnedAtom } from '~/store';
-import { MCPServerDefinition } from './useMCPServerManager';
 import { normalizeMCPSelection } from './normalizeMCPSelection';
+import { MCPServerDefinition } from './useMCPServerManager';
 import { useGetStartupConfig } from '~/data-provider';
 import { setTimestamp } from '~/utils/timestamps';
 
